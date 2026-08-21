@@ -14,6 +14,7 @@ import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
 import { globalPaperCredentials } from "@/modules/broker/global-paper";
 import { AlpacaMarketStreamManager } from "@/modules/market/alpaca-market-stream";
 import { botScanRetentionCutoff } from "@/modules/market/bot-scan-activity";
+import { runOperationalAlertCheck } from "@/modules/monitoring/operational-monitor";
 
 async function reconcilePortfolio() {
   await syncGlobalPaperAccount();
@@ -56,12 +57,17 @@ async function main() {
     await writeFile("/tmp/braiker-worker-heartbeat", String(Date.now()));
     await marketStream.recordHeartbeat().catch((error) => logger.warn({ err: error }, "Unable to record market-stream heartbeat"));
   };
-  cron.schedule("*/1 * * * *", () => void runTask("lease-recovery", async () => { await expireLeases(); await heartbeat(); }), { timezone: "UTC" });
+  cron.schedule("*/1 * * * *", () => void runTask("lease-recovery", async () => {
+    await expireLeases();
+    await heartbeat();
+    await runOperationalAlertCheck();
+  }), { timezone: "UTC" });
   cron.schedule("*/1 * * * *", () => void runReconciliationIfDue(), { timezone: "UTC" });
   cron.schedule("15 0 * * *", () => void runTask("bot-scan-retention", retainBotScanActivity), { timezone: "UTC" });
   cron.schedule("5 * * * * *", () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
   cron.schedule("*/30 * * * * *", () => void processOneExecutionJob(), { timezone: "UTC" });
   await heartbeat();
+  await runOperationalAlertCheck();
   logger.info({ tradingMode: config.TRADING_MODE }, "Braiker worker started in paper-only mode");
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Braiker worker stopping");

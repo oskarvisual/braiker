@@ -70,6 +70,39 @@ describe("OpenAI trade advisor", () => {
     await expect(advisor.analyze(candidate)).rejects.toThrow("OPENAI_REQUEST_FAILED_429");
   });
 
+  it("classifies a provider quota or billing limit without treating it as ordinary rate limiting", async () => {
+    const advisor = new OpenAiAdvisor({
+      apiKey: "test-key",
+      model: "gpt-5.4-mini",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "insufficient_quota", message: "You exceeded your current quota." } }), { status: 429 }))
+    });
+
+    await expect(advisor.analyze(candidate)).rejects.toThrow("OPENAI_QUOTA_EXHAUSTED");
+  });
+
+  it("uses a tiny non-trading request to confirm that advisory access is available before a manual re-enable", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "completed" }), { status: 200 }));
+    const advisor = new OpenAiAdvisor({ apiKey: "test-key", model: "gpt-5.4-mini", timeoutMs: 1_000, fetchImpl });
+
+    await expect(advisor.checkAvailability()).resolves.toBeUndefined();
+
+    const [, request] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(request.body)).toMatchObject({ model: "gpt-5.4-mini", store: false, max_output_tokens: 16 });
+    expect(JSON.parse(request.body).input).toContain("READY");
+  });
+
+  it("keeps the quota circuit closed when the manual availability check receives a quota rejection", async () => {
+    const advisor = new OpenAiAdvisor({
+      apiKey: "test-key",
+      model: "gpt-5.4-mini",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "billing_hard_limit_reached" } }), { status: 429 }))
+    });
+
+    await expect(advisor.checkAvailability()).rejects.toThrow("OPENAI_QUOTA_EXHAUSTED");
+  });
+
   it("calculates persisted cost with Decimal arithmetic rather than JavaScript money floats", () => {
     expect(estimateOpenAiCost({ inputTokens: 400, outputTokens: 100 }).toString()).toBe("0.00075");
   });

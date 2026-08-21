@@ -4,6 +4,9 @@ import { reconcileBotOrder } from "@/modules/broker/paper-sync";
 import { reserveBotCapital } from "@/modules/decision/reservation";
 import { processOneExecutionJob } from "@/modules/execution/execution-worker";
 import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
+import { observeStatusFailureAlerts } from "@/modules/notifications/operational-alerts";
+import { dispatchPendingNotificationAlerts } from "@/modules/notifications/notification-delivery";
+import { disableAiRuntimeForQuota, enableAiRuntimeAfterAvailabilityCheck, getAiRuntimeState } from "@/modules/ai/ai-runtime-state";
 
 const databaseUrl = process.env.BRAIKER_TEST_DATABASE_URL;
 const describeMysql = databaseUrl ? describe : describe.skip;
@@ -51,6 +54,9 @@ describeMysql("security financial transaction boundaries (MySQL)", () => {
   beforeAll(async () => db?.$connect());
   beforeEach(async () => {
     if (!db) return;
+    await db.notificationSettings.deleteMany();
+    await db.notificationAlert.deleteMany();
+    await db.aiRuntimeState.deleteMany();
     await db.fill.deleteMany();
     await db.order.deleteMany();
     await db.executionJob.deleteMany();
@@ -115,5 +121,60 @@ describeMysql("security financial transaction boundaries (MySQL)", () => {
     expect(submissions).toBe(0);
     expect(job.status).toBe(JobStatus.FAILED);
     expect(job.lastError).toBe("KILL_SWITCH");
+  });
+
+  it("deduplicates concurrent status observations in durable MySQL storage", async () => {
+    const status = { services: [{ id: "worker", label: "Worker", state: "warning" as const, detail: "Heartbeat is stale." }] };
+    await Promise.all([1, 2].map(() => observeStatusFailureAlerts(status, new Date("2026-08-21T12:00:00.000Z"), db!)));
+    const alerts = await db!.notificationAlert.findMany({ where: { dedupeKey: "status:worker" } });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.status).toBe("OPEN");
+  });
+
+  it("delivers a selected status alert once through an injected email transport", async () => {
+    const observedAt = new Date("2026-08-21T12:00:00.000Z");
+    await db!.notificationSettings.create({
+      data: {
+        scope: "global",
+        emailEnabled: true,
+        emailRecipients: ["ops@example.test"],
+        emailEvents: ["SYSTEM_STATUS_FAILURE"],
+        webhookEvents: []
+      }
+    });
+    const alert = await db!.notificationAlert.create({
+      data: {
+        dedupeKey: `status:test-${crypto.randomUUID()}`,
+        eventType: "SYSTEM_STATUS_FAILURE",
+        severity: "WARNING",
+        subject: "Worker needs attention",
+        message: "Heartbeat is stale.",
+        firstObservedAt: observedAt,
+        lastObservedAt: observedAt,
+        status: "OPEN"
+      }
+    });
+    const sent: string[] = [];
+
+    const result = await dispatchPendingNotificationAlerts(observedAt, {
+      db: db!,
+      smtpConfigured: true,
+      sendEmail: async (recipients: string[]) => { sent.push(recipients.join(",")); }
+    });
+
+    const persisted = await db!.notificationAlert.findUniqueOrThrow({ where: { id: alert.id } });
+    expect(result).toEqual({ delivered: 1, failed: 0 });
+    expect(sent).toEqual(["ops@example.test"]);
+    expect(persisted.emailDeliveredAt).toEqual(observedAt);
+    expect(persisted.emailLastError).toBeNull();
+  });
+
+  it("persists a provider quota pause and only reopens it after a successful explicit check", async () => {
+    const pausedAt = new Date("2026-08-21T12:00:00.000Z");
+    await disableAiRuntimeForQuota(pausedAt, db!);
+    await expect(getAiRuntimeState(db!)).resolves.toMatchObject({ status: "QUOTA_EXHAUSTED", disabledAt: pausedAt });
+
+    await enableAiRuntimeAfterAvailabilityCheck(new Date("2026-08-21T12:01:00.000Z"), db!);
+    await expect(getAiRuntimeState(db!)).resolves.toMatchObject({ status: "ACTIVE", disabledAt: null });
   });
 });

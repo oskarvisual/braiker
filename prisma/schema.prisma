@@ -565,6 +565,45 @@ model NotificationSettings {
   updatedAt           DateTime @updatedAt @db.DateTime(3)
 }
 
+/// Durable, de-duplicated operational alerts. Delivery timestamps make retries
+/// recoverable without repeatedly notifying while an outage remains open.
+model NotificationAlert {
+  id                     String   @id @default(uuid()) @db.Char(36)
+  dedupeKey              String   @unique @db.VarChar(191)
+  eventType              String   @db.VarChar(64)
+  severity               String   @db.VarChar(16)
+  subject                String   @db.VarChar(255)
+  message                String   @db.Text
+  metadata               Json?
+  status                 String   @default("OPEN") @db.VarChar(16)
+  firstObservedAt        DateTime @db.DateTime(3)
+  lastObservedAt         DateTime @db.DateTime(3)
+  resolvedAt             DateTime? @db.DateTime(3)
+  webhookDeliveredAt     DateTime? @db.DateTime(3)
+  webhookLastAttemptAt   DateTime? @db.DateTime(3)
+  webhookLastError       String?  @db.VarChar(1000)
+  emailDeliveredAt       DateTime? @db.DateTime(3)
+  emailLastAttemptAt     DateTime? @db.DateTime(3)
+  emailLastError         String?  @db.VarChar(1000)
+  createdAt              DateTime @default(now()) @db.DateTime(3)
+  updatedAt              DateTime @updatedAt @db.DateTime(3)
+  @@index([status, lastObservedAt])
+  @@index([eventType, status])
+}
+
+/// Persistent provider circuit breaker. The OpenAI advisory is disabled only
+/// after an actual quota/billing rejection, and can be reopened only after a
+/// successful explicit availability check. It never affects deterministic risk.
+model AiRuntimeState {
+  scope          String   @id @default("global") @db.VarChar(32)
+  status         String   @default("ACTIVE") @db.VarChar(32)
+  disabledAt     DateTime? @db.DateTime(3)
+  lastCheckedAt  DateTime? @db.DateTime(3)
+  lastError      String?  @db.VarChar(128)
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+}
+
 /// Administrator-managed defaults for the three editable limits of each bot
 /// personality. Existing bots retain their own saved policy until edited.
 model BotProfileDefault {

@@ -1,4 +1,13 @@
-export const notificationEventIds = ["BOT_DEAD", "RISK_HALTED", "ORDER_FILLED", "ORDER_REJECTED", "SYNC_FAILED", "PORTFOLIO_DIVERGENCE"] as const;
+export const notificationEventIds = [
+  "BOT_DEAD",
+  "RISK_HALTED",
+  "ORDER_FILLED",
+  "ORDER_REJECTED",
+  "SYNC_FAILED",
+  "PORTFOLIO_DIVERGENCE",
+  "SYSTEM_STATUS_FAILURE",
+  "OPENAI_QUOTA_EXHAUSTED"
+] as const;
 
 export const notificationEvents = [
   { id: "BOT_DEAD", label: "Bot died", description: "A bot reaches zero capital and becomes history-only." },
@@ -7,6 +16,8 @@ export const notificationEvents = [
   { id: "ORDER_REJECTED", label: "Order rejected", description: "Alpaca rejects or fails an order." },
   { id: "SYNC_FAILED", label: "Sync failed", description: "Portfolio reconciliation cannot complete." },
   { id: "PORTFOLIO_DIVERGENCE", label: "Portfolio divergence", description: "Reconciliation detects a material mismatch." },
+  { id: "SYSTEM_STATUS_FAILURE", label: "System status failure", description: "A required service such as MySQL, the worker, the stream, or Alpaca needs attention." },
+  { id: "OPENAI_QUOTA_EXHAUSTED", label: "OpenAI quota exhausted", description: "OpenAI rejected an advisory request because quota or billing is unavailable." },
 ] as const;
 
 export type NotificationEvent = (typeof notificationEventIds)[number];

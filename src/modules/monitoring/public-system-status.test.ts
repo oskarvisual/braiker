@@ -6,6 +6,7 @@ describe("public system status payload", () => {
     const payload = toPublicSystemStatus({
       checkedAt: new Date("2026-08-21T12:00:00.000Z"),
       bots: { on: 2, off: 1, dead: 0 },
+      openAi: { quotaPaused: false, reactivationAllowed: false },
       services: [
         { id: "web", label: "Web application", state: "healthy", detail: "Serving status." },
         { id: "database", label: "MySQL database", state: "healthy", detail: "Connected." },
@@ -21,6 +22,7 @@ describe("public system status payload", () => {
     const payload = toPublicSystemStatus({
       checkedAt: new Date("2026-08-21T12:00:00.000Z"),
       bots: { on: 0, off: 0, dead: 0 },
+      openAi: { quotaPaused: false, reactivationAllowed: false },
       services: [{ id: "webhook", label: "Webhooks", state: "disabled", detail: "Webhook alerts are disabled." }]
     });
 

@@ -2,12 +2,13 @@ import { stat } from "node:fs/promises";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { globalPaperBroker } from "@/modules/broker/global-paper";
+import { getAiRuntimeState, type AiRuntimeState } from "@/modules/ai/ai-runtime-state";
 
 const WORKER_HEARTBEAT_MAX_AGE_MS = 2 * 60 * 1000;
 
-export type SystemStatusState = "healthy" | "warning" | "unavailable" | "disabled";
+export type SystemStatusState = "healthy" | "configured" | "warning" | "unavailable" | "disabled";
 export type SystemStatusService = { id: string; label: string; state: SystemStatusState; detail: string };
-export type SystemStatus = { checkedAt: Date; services: SystemStatusService[]; bots: { on: number; off: number; dead: number } };
+export type SystemStatus = { checkedAt: Date; services: SystemStatusService[]; bots: { on: number; off: number; dead: number }; openAi: { quotaPaused: boolean; reactivationAllowed: boolean } };
 
 type StatusDependencies = {
   now: () => Date;
@@ -16,6 +17,8 @@ type StatusDependencies = {
   marketStreamHeartbeat: () => Promise<Date | null>;
   alpacaHealth: () => Promise<{ healthy: boolean }>;
   notificationSettings: () => Promise<{ webhookEnabled: boolean; encryptedWebhookUrl: string | null; emailEnabled: boolean } | null>;
+  openAiQuotaAlert: () => Promise<boolean>;
+  openAiRuntimeState: () => Promise<AiRuntimeState>;
   botCounts: () => Promise<{ on: number; off: number; dead: number }>;
   config: { aiEnabled: boolean; smtpConfigured: boolean };
 };
@@ -65,6 +68,8 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     marketStreamHeartbeat: overrides.marketStreamHeartbeat ?? getMarketStreamHeartbeat,
     alpacaHealth: overrides.alpacaHealth ?? (() => globalPaperBroker().healthCheck()),
     notificationSettings: overrides.notificationSettings ?? (() => prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { webhookEnabled: true, encryptedWebhookUrl: true, emailEnabled: true } })),
+    openAiQuotaAlert: overrides.openAiQuotaAlert ?? (async () => (await prisma.notificationAlert.count({ where: { dedupeKey: "openai:quota", status: "OPEN" } })) > 0),
+    openAiRuntimeState: overrides.openAiRuntimeState ?? (() => getAiRuntimeState()),
     botCounts: overrides.botCounts ?? (async () => {
       const [on, off, dead] = await Promise.all([
         prisma.botInstance.count({ where: { lifeStatus: "ACTIVE", runMode: "PAPER_ACTIVE", killSwitch: false } }),
@@ -76,25 +81,30 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     config
   };
   const checkedAt = dependencies.now();
-  const [database, heartbeat, streamHeartbeat, alpaca, notifications, bots] = await Promise.all([
+  const [database, heartbeat, streamHeartbeat, alpaca, notifications, openAiQuotaAlert, openAiRuntimeState, bots] = await Promise.all([
     statusOf(dependencies.databaseCheck, { id: "database", label: "MySQL database", state: "healthy", detail: "Connected and responding." }, { id: "database", label: "MySQL database", state: "unavailable", detail: "Connection check failed." }),
     dependencies.workerHeartbeat(),
     dependencies.marketStreamHeartbeat().catch(() => null),
     dependencies.alpacaHealth(),
     dependencies.notificationSettings().catch(() => null),
+    dependencies.openAiQuotaAlert().catch(() => false),
+    dependencies.openAiRuntimeState().catch(() => ({ status: "ACTIVE" as const, disabledAt: null, lastCheckedAt: null })),
     dependencies.botCounts().catch(() => ({ on: 0, off: 0, dead: 0 }))
   ]);
 
   const smtp: SystemStatusService = dependencies.config.smtpConfigured
-    ? { id: "smtp", label: "Email / SMTP", state: "warning", detail: "SMTP is configured, but alert delivery is not implemented yet." }
+    ? { id: "smtp", label: "Email / SMTP", state: "configured", detail: "SMTP is configured for selected operational alerts." }
     : { id: "smtp", label: "Email / SMTP", state: "disabled", detail: "SMTP is not configured." };
   const webhook: SystemStatusService = notifications?.webhookEnabled && notifications.encryptedWebhookUrl
-    ? { id: "webhook", label: "Webhooks", state: "warning", detail: "A destination is saved, but alert delivery is not implemented yet." }
+    ? { id: "webhook", label: "Webhooks", state: "configured", detail: "A secure destination is configured for selected operational alerts." }
     : notifications?.webhookEnabled
       ? { id: "webhook", label: "Webhooks", state: "warning", detail: "Webhooks are enabled but need a saved destination." }
       : { id: "webhook", label: "Webhooks", state: "disabled", detail: "Webhook alerts are disabled." };
-  const openAi: SystemStatusService = dependencies.config.aiEnabled
-    ? { id: "openai", label: "OpenAI / AI", state: "warning", detail: "AI advisory is enabled for candidate signals; this is configuration readiness, not a live provider check." }
+  const quotaPaused = openAiRuntimeState.status === "QUOTA_EXHAUSTED" || openAiQuotaAlert;
+  const openAi: SystemStatusService = quotaPaused
+    ? { id: "openai", label: "OpenAI / AI", state: "warning", detail: "OpenAI advisory is paused because the provider reported quota or billing unavailable. Deterministic safeguards continue to run. An administrator can perform a minimal availability check to reactivate it." }
+    : dependencies.config.aiEnabled
+    ? { id: "openai", label: "OpenAI / AI", state: "configured", detail: "AI advisory is configured for candidate signals. It is contacted only when a candidate requires review." }
     : { id: "openai", label: "OpenAI / AI", state: "disabled", detail: "AI advisory is disabled and is not part of candidate reviews." };
 
   return {
@@ -111,6 +121,7 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
       smtp,
       webhook
     ],
-    bots
+    bots,
+    openAi: { quotaPaused, reactivationAllowed: dependencies.config.aiEnabled && quotaPaused }
   };
 }

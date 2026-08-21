@@ -4,6 +4,29 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 
 const LEASE_MS = 60_000;
+const LEASE_RECOVERY_MAX_ATTEMPTS = 3;
+
+function isRetryableWriteConflict(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
+}
+
+/**
+ * Lease recovery only performs idempotent conditional updates. MySQL can still
+ * abort a concurrent update with P2034, so retry that transient conflict a few
+ * times instead of marking the scheduler unhealthy.
+ */
+export async function retryLeaseRecoveryWrite<T>(operation: () => Promise<T>, pause: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      attempt += 1;
+      if (!isRetryableWriteConflict(error) || attempt >= LEASE_RECOVERY_MAX_ATTEMPTS) throw error;
+      await pause(attempt * 100);
+    }
+  }
+}
 
 export async function ensureTask(name: string, cronExpression: string, timezone = "America/New_York") {
   return prisma.scheduledTask.upsert({ where: { name }, create: { name, cronExpression, timezone }, update: {} });
@@ -34,6 +57,9 @@ export async function runTask(taskName: string, handler: () => Promise<void>) {
 }
 
 export async function expireLeases() {
-  await prisma.jobRun.updateMany({ where: { status: JobStatus.RUNNING, leaseExpiresAt: { lt: new Date() } }, data: { status: JobStatus.PENDING, leaseToken: null, leaseExpiresAt: null } });
-  await prisma.executionJob.updateMany({ where: { status: JobStatus.RUNNING, leaseExpiresAt: { lt: new Date() } }, data: { status: JobStatus.PENDING, leaseToken: null, leaseExpiresAt: null } });
+  await retryLeaseRecoveryWrite(async () => {
+    const now = new Date();
+    await prisma.jobRun.updateMany({ where: { status: JobStatus.RUNNING, leaseExpiresAt: { lt: now } }, data: { status: JobStatus.PENDING, leaseToken: null, leaseExpiresAt: null } });
+    await prisma.executionJob.updateMany({ where: { status: JobStatus.RUNNING, leaseExpiresAt: { lt: now } }, data: { status: JobStatus.PENDING, leaseToken: null, leaseExpiresAt: null } });
+  });
 }

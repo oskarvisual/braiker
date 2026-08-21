@@ -20,15 +20,15 @@ Implemented today:
 - Cookie-session authentication; Admin, Operator, and Viewer roles.
 - Admin user management and password change flow.
 - One server-only Alpaca Paper connection from `.env`, virtual wallets with a shared global capital pool, and scheduled global portfolio reconciliation.
-- Admin-managed alert preferences: independently selected webhook/email events, encrypted webhook destinations, and SMTP environment readiness.
+- Admin-managed alert preferences with durable, de-duplicated webhook/email delivery. Required-status outages and OpenAI quota/billing rejections are delivered only to the enabled channels that selected them, then retried at a bounded interval until delivery succeeds.
 - Global, dismissible action feedback through toasts, so an error from a modal is never rendered elsewhere on the page.
 - A fixed operational sidebar and a compact top account menu for Settings, user administration, password management, and sign-out.
 - Dashboard with Alpaca equity/cash, a seven-day account chart, positions, broker orders, and allocated bot capital.
-- Order-first History with lifecycle and bot filters, plus a per-bot modal with separate **Operations** and **Analysis activity** tabs. Analysis records explain completed, skipped, and failed cycles in plain English even when no order is placed; retained scan activity is pruned after 30 days.
+- Order-first History with lifecycle and bot filters, plus a per-bot modal with separate **Operations** and **Analysis activity** tabs. Each modal also exposes a deterministic, read-only survival indicator with native SVG iconography; it never changes controls or execution, and does not mistake capital that is invested or reserved for a loss. Analysis records explain completed, skipped, and failed cycles in plain English even when no order is placed; retained scan activity is pruned after 30 days.
 - Three bot profiles: Guardian, Navigator, Explorer; Admin-editable defaults for position, daily-loss, and trade-count caps, plus per-bot name, avatar, budget, symbols, instruction, and bounded risk limits.
 - Atomic budget allocation and adjustments, per-bot capital events, cloning with source lineage, `DEAD`-state guards, concurrent ON/OFF control for independently funded bots, and audit logs.
 - Persistent scheduler leases, health/readiness endpoints, Prometheus metrics, and worker heartbeats.
-- Admin-only **System status** page plus public `GET /api/status` JSON: live MySQL, worker-heartbeat and Alpaca Paper checks; bot counts; and accurate configured/disabled states for AI, SMTP and webhooks without exposing secrets. The public endpoint is for uptime automation and returns only the already-sanitized aggregate state.
+- Admin-only **System status** page plus public `GET /api/status` JSON: live MySQL, worker-heartbeat and Alpaca Paper checks; bot counts; status for AI, SMTP and webhooks without exposing secrets; and an OpenAI warning after a durable provider quota/billing rejection. That rejection opens a persistent advisory circuit: AI stops receiving candidate calls until an Admin explicitly selects **Check budget & reactivate AI**. The one minimal, non-trading provider check must succeed before the circuit reopens; an unavailable or still-exhausted provider remains paused. BrAIker does not estimate or display an OpenAI account balance. A bot marked ON is eligible for the worker market cycle; it is not claimed to be evaluating while the worker heartbeat is stale. The public endpoint is for uptime automation and returns only the already-sanitized aggregate state.
 - A shared, once-per-minute market cycle for ON bots: Alpaca IEX minute bars and quotes are persisted, closed candles are deduplicated, each bot is evaluated once per candle, and durable per-bot activity verifies what the worker did before a trade exists.
 - Deterministic `trend-v1` strategy with EMA, RSI, ATR, momentum, relative-volume, and SPY/QQQ regime context. It produces auditable `BUY`, `SELL`, or `HOLD` signals. Optional OpenAI advisory review runs only for candidate `BUY`/`SELL` signals; it may veto a candidate but can never approve risk, raise limits, size an order, or submit one.
 - English decision reports connect market snapshot → deterministic signal → optional AI advisory → risk decision → execution → fills. They are linked from History and each bot's order history.
@@ -38,7 +38,6 @@ Implemented today:
 Not implemented yet:
 
 - RAG, bot chat, or autonomous learning. The optional OpenAI trade-advisory adapter is implemented, but it is deliberately non-privileged.
-- Webhook/email alert delivery. Preferences and destinations can be configured, but delivery waits for durable event dispatch and SMTP configuration.
 - Live trading or any broker besides Alpaca Paper.
 
 Turning a bot ON permits the worker's shared market cycle to evaluate its configured symbols. A trade is still possible only when the deterministic strategy produces a candidate, the optional AI advisory does not veto it, and the persisted risk engine approves it. This remains Alpaca Paper only.

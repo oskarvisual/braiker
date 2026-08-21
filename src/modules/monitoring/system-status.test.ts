@@ -12,6 +12,8 @@ describe("system status", () => {
       alpacaHealth: async () => ({ healthy: true }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:59:30.000Z"),
       notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: "ciphertext", emailEnabled: true }),
+      openAiQuotaAlert: async () => false,
+      openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
       botCounts: async () => ({ on: 2, off: 1, dead: 1 }),
       config: { aiEnabled: false, smtpConfigured: true }
     });
@@ -23,8 +25,8 @@ describe("system status", () => {
       expect.objectContaining({ id: "alpaca", state: "healthy" }),
       expect.objectContaining({ id: "market-stream", state: "healthy" }),
       expect.objectContaining({ id: "openai", state: "disabled" }),
-      expect.objectContaining({ id: "smtp", state: "warning" }),
-      expect.objectContaining({ id: "webhook", state: "warning" })
+      expect.objectContaining({ id: "smtp", state: "configured" }),
+      expect.objectContaining({ id: "webhook", state: "configured" })
     ]));
     expect(status.services.find((service) => service.id === "openai")?.detail).toContain("advisory");
     expect(status.bots).toEqual({ on: 2, off: 1, dead: 1 });
@@ -39,6 +41,8 @@ describe("system status", () => {
       alpacaHealth: async () => ({ healthy: false }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:55:00.000Z"),
       notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: null, emailEnabled: false }),
+      openAiQuotaAlert: async () => false,
+      openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
       botCounts: async () => ({ on: 0, off: 3, dead: 0 }),
       config: { aiEnabled: true, smtpConfigured: false }
     });
@@ -48,10 +52,32 @@ describe("system status", () => {
       expect.objectContaining({ id: "worker", state: "warning" }),
       expect.objectContaining({ id: "alpaca", state: "unavailable" }),
       expect.objectContaining({ id: "market-stream", state: "warning" }),
-      expect.objectContaining({ id: "openai", state: "warning" }),
+      expect.objectContaining({ id: "openai", state: "configured" }),
       expect.objectContaining({ id: "smtp", state: "disabled" }),
       expect.objectContaining({ id: "webhook", state: "warning" })
     ]));
-    expect(status.services.find((service) => service.id === "openai")?.detail).toContain("not a live provider check");
+    expect(status.services.find((service) => service.id === "openai")?.detail).toContain("only when a candidate requires review");
+  });
+
+  it("shows an OpenAI quota rejection as an actionable warning without exposing provider details", async () => {
+    const status = await getSystemStatus({
+      now: () => now,
+      databaseCheck: async () => undefined,
+      workerHeartbeat: async () => now,
+      marketStreamHeartbeat: async () => now,
+      alpacaHealth: async () => ({ healthy: true }),
+      notificationSettings: async () => null,
+      openAiQuotaAlert: async () => true,
+      openAiRuntimeState: async () => ({ status: "QUOTA_EXHAUSTED", disabledAt: now, lastCheckedAt: now }),
+      botCounts: async () => ({ on: 1, off: 0, dead: 0 }),
+      config: { aiEnabled: true, smtpConfigured: false }
+    });
+
+    expect(status.services.find((service) => service.id === "openai")).toMatchObject({
+      state: "warning",
+      detail: expect.stringContaining("quota or billing")
+    });
+    expect(status.openAi).toEqual({ quotaPaused: true, reactivationAllowed: true });
+    expect(JSON.stringify(status)).not.toContain("insufficient_quota");
   });
 });

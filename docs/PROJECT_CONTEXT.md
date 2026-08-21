@@ -47,6 +47,7 @@ The initial values shown in the table are defaults, not hard-coded product behav
 - Survival is always enabled. It is not a profile setting and must not appear as an optional switch.
 - The product invariant is that `currentCapital = 0` makes a bot `DEAD`, irreversibly. A dead bot cannot be reactivated, edited, deleted, or repurposed; its history remains.
 - Clone creates a *new* bot with a new budget and an explicit source reference. It may clone an active or dead source, but must never revive or modify the source bot.
+- The UI exposes a deterministic, read-only survival indicator (`Calibrating`, `Thriving`, `Stable`, `Cautious`, `Stressed`, `Critical`, or `Dead`) with native SVG iconography. It is never a control and cannot change risk, power, Kill Switch, capital, or execution. `Dead` always wins; before the first scan the bot is `Calibrating`; and capital that is invested in an open position or reserved for an order is treated as deployed, so low liquid cash alone must never produce a stressed/critical label.
 
 ### Public controls
 
@@ -64,12 +65,12 @@ Do not bring back Simulation, a Paper button/tag, a separate enable button, or a
 
 - `/login` — sign in.
 - `/` — dashboard: Alpaca account figures, chart, positions, broker orders, and bot summary.
-- `/setup` — Admin bot listing and add/edit/clone modal. It shows current bot capital, risk limits, allowed symbols, and one ON/OFF switch. Active bots can move capital to/from their wallet; dead bots expose history and cloning only. Clicking a bot name or eye icon opens its full-width history modal with separate Operations and Analysis activity tabs.
+- `/setup` — Admin bot listing and add/edit/clone modal. It shows current bot capital, a read-only survival indicator, risk limits, allowed symbols, and one ON/OFF switch. Active bots can move capital to/from their wallet; dead bots expose history and cloning only. Clicking a bot name or eye icon opens its full-width history modal with the same survival explanation plus separate Operations and Analysis activity tabs.
 - `/activity` — order-first History. It filters by lifecycle (`Open`, `In progress`, `Closed`, `Rejected`), bot, and symbol/status text. BrAIker orders link to `/bots/[botId]` and their English decision report at `/decisions/[proposalId]`; Alpaca orders without an internal link are explicitly shown as external/no bot linked.
 - `/bots/[botId]` — read-only bot detail: configured universe, capital/status, and that bot's recorded BrAIker orders. Each internal order links to its decision report. A dead bot remains history-only.
 - `/decisions/[proposalId]` — authorized, read-only English causal report: market snapshot and indicators → deterministic signal → optional AI advisory → persisted risk checks → execution lifecycle → fills. It never exposes credentials or prompt secrets.
 - `/settings` — Admin global Paper-capital, virtual wallet creation and per-wallet budget management, sync interval, alert-preference, and profile configuration. Profile defaults affect new bots; bot-specific risk limits are edited from the existing bot's three-step editor. It never asks for Alpaca credentials because Personal Paper mode reads the single pair from `.env`. Webhooks and email each choose their destination and alert events independently. Webhook destinations are encrypted and never shown again. It is reached through the top account menu, not the sidebar.
-- `/status` — Admin-only operational status page, reached through the top account menu. It performs live checks for MySQL, the worker heartbeat and Alpaca Paper, reports ON/OFF/DEAD bot counts, and accurately labels OpenAI, SMTP and webhooks as disabled, configured-but-not-delivered, or unavailable. It never displays credentials, webhook URLs, recipients, or account identifiers.
+- `/status` — Admin-only operational status page, reached through the top account menu. It performs live checks for MySQL, the worker heartbeat and Alpaca Paper, reports ON/OFF/DEAD bot counts, and accurately labels OpenAI, SMTP and webhooks as disabled, configured, warning, or unavailable. A durable OpenAI quota/billing rejection pauses the global advisory circuit and appears as a warning. Only in that state the page offers an Admin **Check budget & reactivate AI** control; it sends one minimal, non-trading availability request and reopens advisory only on success. It never estimates an OpenAI balance or displays credentials, webhook URLs, recipients, provider payloads, or account identifiers.
 - `GET /api/status` — public, unauthenticated JSON equivalent for uptime checks and automations. It returns an overall `healthy`/`warning`/`unavailable` state, check time, aggregate bot counts, and the same sanitized service states as `/status`; it must never add credentials, webhook destinations, recipients, account IDs, database URLs, or raw exception details.
 - `/admin/users` — Admin user CRUD, reached through the top account menu.
 - `/account/password` — password change.
@@ -86,7 +87,7 @@ The bot modal is a three-step wizard. Navigation is non-persistent: it must neve
 - The worker runs a leased `market-cycle` once per minute. It checks the one Alpaca Paper market clock, reconciles the global account once, loads all active bots, and uses REST backfill plus latest quotes for the union of permitted symbols and `SPY`/`QQQ`. REST is the gap-recovery path; the shared evaluation remains idempotent. Every open-market cycle writes a durable, per-bot `BotScanRun` with safe English outcomes; closed-market/no-symbol waits are recorded at most hourly. A worker retention task removes scan rows older than 30 days.
 - Only completed candles are persisted/evaluated. `MarketEvaluation.evaluationKey` makes an evaluation idempotent per bot, symbol, timeframe, and candle timestamp.
 - `trend-v1` is deterministic: EMA trend, RSI, ATR, momentum, relative volume, and SPY/QQQ regime create `BUY`, `SELL`, or `HOLD`. Each pass persists a market snapshot and strategy signal.
-- An eligible `BUY`/`SELL` candidate may receive an optional OpenAI advisory review. The adapter receives a redacted market/signal context, uses structured output, is rate-limited per bot, and records model, request, response, token use, cost estimate, or sanitized failure. It may only veto (`REJECT`) a candidate. `PROCEED`, `CAUTION`, timeout, malformed output, or provider failure never approve risk or submit an order; the deterministic path continues to the existing risk engine.
+- An eligible `BUY`/`SELL` candidate may receive an optional OpenAI advisory review. The adapter receives a redacted market/signal context, uses structured output, is rate-limited per bot, and records model, request, response, token use, cost estimate, or sanitized failure. A confirmed provider quota/billing rejection persistently pauses advisory calls globally, so retries do not spend more tokens; an Admin can reopen it only after a minimal availability check succeeds. It may only veto (`REJECT`) a candidate. `PROCEED`, `CAUTION`, timeout, malformed output, or provider failure never approve risk or submit an order; the deterministic path continues to the existing risk engine.
 - A candidate not vetoed by AI goes through the existing risk engine, then an idempotent execution job. `client_order_id` is recovered from Alpaca before a retry submits an order.
 - Reconciliation records broker snapshots and terminal fills. Virtual cash, reservations, and `BotPosition` are attributed to exactly one bot; a zero-cash bot with no remaining position becomes permanently `DEAD`, is switched OFF, and retains its trace.
 
@@ -98,15 +99,15 @@ Do not claim these exist or wire placeholders that imply they do:
 
 1. A reproducible backtest runner. Persistent Alpaca WebSocket streaming is implemented as one worker-owned connection with durable heartbeats, bounded reconnects, and REST backfill; the shared minute cycle remains the idempotent decision path.
 2. RAG, bot conversation, memory retrieval, or a bot learning loop. The implemented OpenAI advisory is optional, rate-limited, auditable, and cannot gain execution authority.
-3. Alert delivery. Notification preferences and destinations are persisted now, but no worker dispatches webhook/email messages until durable event semantics and delivery/retry handling are implemented. SMTP configuration remains environment-only.
+3. A contextual bot conversation/RAG workflow. It must remain read-only and advisory: no conversation can modify budget, risk limits, power state, Kill Switch, or order execution.
 
 ## Next product milestones
 
 Prioritize in this order unless the user explicitly reprioritizes:
 
 1. Add reproducible backtests without weakening the existing stream, REST-backfill, and evaluation safeguards.
-2. Add notification delivery only after durable event semantics exist.
-3. Add richer per-bot decision reports and portfolio/P&L views.
+2. Add richer per-bot decision reports and portfolio/P&L views.
+3. Add a read-only contextual chat over an existing decision/analysis record.
 4. Extend the optional AI advisory only behind validated, auditable, non-privileged adapters.
 
 ## Paper soak entry criteria
