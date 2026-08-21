@@ -1,4 +1,5 @@
 import type { BotSurvivalState } from "@/modules/bots/survival-state";
+import styles from "./bot-survival-status.module.css";
 
 const moodEmoji: Record<BotSurvivalState["code"], string> = {
   THRIVING: "😄",
@@ -15,5 +16,5 @@ export function survivalMoodEmoji(code: BotSurvivalState["code"]) {
 }
 
 export function BotSurvivalStatus({ state, compact = false }: { state: BotSurvivalState; compact?: boolean }) {
-  return <span className={`survivalStatus ${state.tone} ${compact ? "compact" : ""}`} title={state.summary}><i className="survivalEmoji" aria-hidden="true">{survivalMoodEmoji(state.code)}</i><span><strong>{state.label}</strong>{!compact && <small>{state.summary}</small>}</span></span>;
+  return <span className={`survivalStatus ${state.tone} ${compact ? "compact" : ""}`} title={state.summary}><span className={styles.emoji} aria-hidden="true">{survivalMoodEmoji(state.code)}</span><span><strong>{state.label}</strong>{!compact && <small>{state.summary}</small>}</span></span>;
 }

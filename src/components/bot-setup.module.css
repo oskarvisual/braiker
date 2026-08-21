@@ -1,3 +1,14 @@
 .botSetup :global(.botNameCell > .avatar) {
   display: none;
 }
+
+/* Keep both row actions visible at desktop widths. */
+.botSetup :global(.botTable .userRow) {
+  grid-template-columns: minmax(180px, 1.15fr) minmax(140px, 0.78fr) minmax(125px, 0.6fr) minmax(145px, 0.8fr) minmax(135px, 0.75fr) 88px 120px;
+}
+
+@media (max-width: 800px) {
+  .botSetup :global(.botTable .userRow) {
+    grid-template-columns: 1fr 42px 42px;
+  }
+}
