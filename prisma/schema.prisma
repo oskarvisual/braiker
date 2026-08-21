@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum TradingMode {
+  PAPER
+  LIVE
+}
+
+enum BotStatus {
+  RUNNING
+  PAUSED
+  RISK_HALTED
+  ERROR
+  MAINTENANCE
+}
+
+enum BotRunMode {
+  OFF
+  SIMULATION
+  PAPER_ACTIVE
+}
+
+enum BotLifeStatus {
+  ACTIVE
+  DEAD
+}
+
+enum TradeAction {
+  BUY
+  SELL
+  HOLD
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+}
+
+enum OrderStatus {
+  PENDING
+  NEW
+  PARTIALLY_FILLED
+  FILLED
+  CANCELED
+  REJECTED
+  FAILED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+model User {
+  id           String         @id @default(uuid()) @db.Char(36)
+  email        String         @unique @db.VarChar(320)
+  passwordHash String         @db.VarChar(255)
+  role         UserRole       @default(VIEWER)
+  mustChangePassword Boolean  @default(true)
+  createdAt    DateTime       @default(now()) @db.DateTime(3)
+  updatedAt    DateTime       @updatedAt @db.DateTime(3)
+  sessions     Session[]
+  memberships  WalletMember[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Char(36)
+  userId    String   @db.Char(36)
+  tokenHash String   @unique @db.Char(64)
+  expiresAt DateTime @db.DateTime(3)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+}
+
+model Wallet {
+  id          String         @id @default(uuid()) @db.Char(36)
+  name        String         @db.VarChar(120)
+  currency    String         @default("USD") @db.Char(3)
+  managedCapital Decimal     @default(100) @db.Decimal(28, 12)
+  unallocatedCapital Decimal @default(100) @db.Decimal(28, 12)
+  createdAt   DateTime       @default(now()) @db.DateTime(3)
+  updatedAt   DateTime       @updatedAt @db.DateTime(3)
+  members     WalletMember[]
+  connections BrokerConnection[]
+  bots        BotInstance[]
+  auditLogs   AuditLog[]
+  positions   Position[]
+  portfolioSnapshots PortfolioSnapshot[]
+  brokerOrderSnapshots BrokerOrderSnapshot[]
+}
+
+model WalletMember {
+  walletId String   @db.Char(36)
+  userId   String   @db.Char(36)
+  role     UserRole
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([walletId, userId])
+  @@index([userId])
+}
+
+model BrokerConnection {
+  id              String      @id @default(uuid()) @db.Char(36)
+  walletId        String      @db.Char(36)
+  provider        String      @db.VarChar(40)
+  mode            TradingMode @default(PAPER)
+  encryptedKey    String      @db.Text
+  keyIv           String      @db.VarChar(64)
+  keyTag          String      @db.VarChar(64)
+  encryptedSecret String      @db.Text
+  secretIv        String      @db.VarChar(64)
+  secretTag       String      @db.VarChar(64)
+  keyVersion      Int         @default(1)
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
+  updatedAt       DateTime    @updatedAt @db.DateTime(3)
+  wallet          Wallet      @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  @@unique([walletId, provider, mode])
+}
+
+model BotInstance {
+  id             String    @id @default(uuid()) @db.Char(36)
+  walletId       String    @db.Char(36)
+  name           String    @db.VarChar(120)
+  templateId     String    @default("NAVIGATOR") @db.VarChar(24)
+  avatarSeed     String    @default("compass") @db.VarChar(32)
+  runMode        BotRunMode @default(OFF)
+  lifeStatus     BotLifeStatus @default(ACTIVE)
+  initialCapital Decimal   @default(0) @db.Decimal(28, 12)
+  currentCapital Decimal   @default(0) @db.Decimal(28, 12)
+  reservedCapital Decimal  @default(0) @db.Decimal(28, 12)
+  diedAt         DateTime? @db.DateTime(3)
+  status         BotStatus @default(PAUSED)
+  killSwitch     Boolean   @default(true)
+  riskPolicy     Json
+  strategyProfile Json
+  aiProfile      Json?
+  cloneSourceId  String?   @db.Char(36)
+  createdAt      DateTime  @default(now()) @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @db.DateTime(3)
+  wallet         Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  stateChanges   BotStateTransition[]
+  modeChanges    BotModeTransition[]
+  memories       BotMemoryEntry[]
+  capitalEvents  BotCapitalEvent[]
+  proposals      TradeProposal[]
+  watchlist      Watchlist[]
+  portfolioSnapshots PortfolioSnapshot[]
+  @@index([walletId, status])
+  @@index([cloneSourceId])
+}
+
+model BotCapitalEvent {
+  id           String      @id @default(uuid()) @db.Char(36)
+  botId        String      @db.Char(36)
+  kind         String      @db.VarChar(32)
+  amount       Decimal     @db.Decimal(28, 12)
+  balanceAfter Decimal     @db.Decimal(28, 12)
+  metadata     Json?
+  createdAt    DateTime    @default(now()) @db.DateTime(3)
+  bot          BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, createdAt])
+}
+
+model BotModeTransition {
+  id        String     @id @default(uuid()) @db.Char(36)
+  botId     String     @db.Char(36)
+  fromMode  BotRunMode?
+  toMode    BotRunMode
+  reason    String     @db.VarChar(255)
+  createdAt DateTime   @default(now()) @db.DateTime(3)
+  bot       BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, createdAt])
+}
+
+model BotMemoryEntry {
+  id        String      @id @default(uuid()) @db.Char(36)
+  botId     String      @db.Char(36)
+  kind      String      @db.VarChar(32)
+  content   Json
+  createdAt DateTime    @default(now()) @db.DateTime(3)
+  bot       BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, kind, createdAt])
+}
+
+model BotStateTransition {
+  id        String    @id @default(uuid()) @db.Char(36)
+  botId     String    @db.Char(36)
+  fromState BotStatus?
+  toState   BotStatus
+  reason    String    @db.VarChar(255)
+  createdAt DateTime  @default(now()) @db.DateTime(3)
+  bot       BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, createdAt])
+}
+
+model Watchlist {
+  id        String   @id @default(uuid()) @db.Char(36)
+  botId     String   @db.Char(36)
+  symbol    String   @db.VarChar(16)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  bot       BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@unique([botId, symbol])
+  @@index([symbol, enabled])
+}
+
+model MarketBar {
+  id        String   @id @default(uuid()) @db.Char(36)
+  symbol    String   @db.VarChar(16)
+  timeframe String   @db.VarChar(16)
+  timestamp DateTime @db.DateTime(3)
+  open      Decimal  @db.Decimal(28, 12)
+  high      Decimal  @db.Decimal(28, 12)
+  low       Decimal  @db.Decimal(28, 12)
+  close     Decimal  @db.Decimal(28, 12)
+  volume    Decimal  @db.Decimal(28, 12)
+  feed      String   @db.VarChar(24)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@unique([symbol, timeframe, timestamp, feed])
+  @@index([symbol, timeframe, timestamp])
+}
+
+model MarketSnapshot {
+  id        String   @id @default(uuid()) @db.Char(36)
+  botId     String   @db.Char(36)
+  symbol    String   @db.VarChar(16)
+  payload   Json
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@index([botId, symbol, createdAt])
+}
+
+model MarketStreamEvent {
+  id        String   @id @default(uuid()) @db.Char(36)
+  symbol    String?  @db.VarChar(16)
+  eventType String   @db.VarChar(48)
+  provider  String   @db.VarChar(40)
+  payload   Json
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@index([symbol, createdAt])
+}
+
+model StrategySignal {
+  id        String      @id @default(uuid()) @db.Char(36)
+  botId     String      @db.Char(36)
+  snapshotId String?    @db.Char(36)
+  symbol    String      @db.VarChar(16)
+  action    TradeAction
+  confidence Int
+  reason    String      @db.Text
+  payload   Json
+  createdAt DateTime    @default(now()) @db.DateTime(3)
+  @@index([botId, symbol, createdAt])
+}
+
+model AiDecision {
+  id        String   @id @default(uuid()) @db.Char(36)
+  botId     String   @db.Char(36)
+  provider  String   @db.VarChar(40)
+  model     String   @db.VarChar(120)
+  request   Json
+  response  Json?
+  inputTokens Int?
+  outputTokens Int?
+  costUsd   Decimal? @db.Decimal(28, 12)
+  error     String?  @db.Text
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@index([botId, createdAt])
+}
+
+model TradeProposal {
+  id          String      @id @default(uuid()) @db.Char(36)
+  botId       String      @db.Char(36)
+  signalId    String?     @db.Char(36)
+  aiDecisionId String?    @db.Char(36)
+  symbol      String      @db.VarChar(16)
+  action      TradeAction
+  orderType   OrderType
+  quantity    Decimal     @db.Decimal(28, 12)
+  limitPrice  Decimal?    @db.Decimal(28, 12)
+  estimatedPrice Decimal  @db.Decimal(28, 12)
+  status      String      @default("PENDING_RISK") @db.VarChar(32)
+  context     Json
+  createdAt   DateTime    @default(now()) @db.DateTime(3)
+  bot         BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  riskDecision RiskDecision?
+  executionJob ExecutionJob?
+  @@index([botId, symbol, createdAt])
+}
+
+model RiskDecision {
+  id          String        @id @default(uuid()) @db.Char(36)
+  proposalId  String        @unique @db.Char(36)
+  approved    Boolean
+  reason      String        @db.VarChar(80)
+  checks      Json
+  approvedOrder Json?
+  createdAt   DateTime      @default(now()) @db.DateTime(3)
+  proposal    TradeProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+}
+
+model ExecutionJob {
+  id              String      @id @default(uuid()) @db.Char(36)
+  proposalId      String      @unique @db.Char(36)
+  status          JobStatus   @default(PENDING)
+  attempts        Int         @default(0)
+  leaseToken      String?     @db.Char(36)
+  leaseExpiresAt  DateTime?   @db.DateTime(3)
+  lastError       String?     @db.Text
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
+  updatedAt       DateTime    @updatedAt @db.DateTime(3)
+  proposal        TradeProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  @@index([status, leaseExpiresAt])
+}
+
+model Order {
+  id            String      @id @default(uuid()) @db.Char(36)
+  proposalId    String      @db.Char(36)
+  brokerOrderId String?     @unique @db.VarChar(128)
+  clientOrderId String      @unique @db.VarChar(128)
+  symbol        String      @db.VarChar(16)
+  action        TradeAction
+  orderType     OrderType
+  quantity      Decimal     @db.Decimal(28, 12)
+  limitPrice    Decimal?    @db.Decimal(28, 12)
+  status        OrderStatus @default(PENDING)
+  rawPayload    Json?
+  createdAt     DateTime    @default(now()) @db.DateTime(3)
+  updatedAt     DateTime    @updatedAt @db.DateTime(3)
+  fills         Fill[]
+  @@index([proposalId, createdAt])
+}
+
+model Fill {
+  id            String   @id @default(uuid()) @db.Char(36)
+  orderId       String   @db.Char(36)
+  brokerFillId  String   @unique @db.VarChar(128)
+  quantity      Decimal  @db.Decimal(28, 12)
+  price         Decimal  @db.Decimal(28, 12)
+  filledAt      DateTime @db.DateTime(3)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([orderId, filledAt])
+}
+
+model Position {
+  id                String   @id @default(uuid()) @db.Char(36)
+  walletId          String   @db.Char(36)
+  symbol            String   @db.VarChar(16)
+  quantity          Decimal  @db.Decimal(28, 12)
+  averageEntryPrice Decimal  @db.Decimal(28, 12)
+  marketValue       Decimal  @db.Decimal(28, 12)
+  unrealizedPnl     Decimal  @db.Decimal(28, 12)
+  updatedAt         DateTime @updatedAt @db.DateTime(3)
+  wallet            Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  @@unique([walletId, symbol])
+  @@index([walletId, updatedAt])
+}
+
+model BrokerOrderSnapshot {
+  id              String   @id @default(uuid()) @db.Char(36)
+  walletId        String   @db.Char(36)
+  brokerOrderId   String   @unique @db.VarChar(128)
+  clientOrderId   String?  @db.VarChar(128)
+  symbol          String   @db.VarChar(16)
+  side            String   @db.VarChar(8)
+  orderType       String   @db.VarChar(16)
+  status          String   @db.VarChar(32)
+  quantity        Decimal  @db.Decimal(28, 12)
+  filledQuantity  Decimal  @default(0) @db.Decimal(28, 12)
+  filledAveragePrice Decimal? @db.Decimal(28, 12)
+  submittedAt     DateTime @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+  rawPayload      Json
+  wallet          Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  @@index([walletId, submittedAt])
+  @@index([walletId, status])
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(uuid()) @db.Char(36)
+  walletId      String   @db.Char(36)
+  botId         String?  @db.Char(36)
+  equity        Decimal  @db.Decimal(28, 12)
+  cash          Decimal  @db.Decimal(28, 12)
+  exposure      Decimal  @db.Decimal(28, 12)
+  realizedPnl   Decimal  @db.Decimal(28, 12)
+  unrealizedPnl Decimal  @db.Decimal(28, 12)
+  capturedAt    DateTime @db.DateTime(3)
+  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  bot           BotInstance? @relation(fields: [botId], references: [id], onDelete: SetNull)
+  @@index([walletId, capturedAt])
+}
+
+model DailyPerformance {
+  id        String   @id @default(uuid()) @db.Char(36)
+  walletId  String   @db.Char(36)
+  day       DateTime @db.Date
+  startingEquity Decimal @db.Decimal(28, 12)
+  endingEquity   Decimal @db.Decimal(28, 12)
+  realizedPnl    Decimal @db.Decimal(28, 12)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@unique([walletId, day])
+}
+
+model ReconciliationRun {
+  id             String   @id @default(uuid()) @db.Char(36)
+  walletId       String   @db.Char(36)
+  status         String   @db.VarChar(32)
+  discrepancy    Json?
+  startedAt      DateTime @default(now()) @db.DateTime(3)
+  completedAt    DateTime? @db.DateTime(3)
+  @@index([walletId, startedAt])
+}
+
+model ScheduledTask {
+  id            String   @id @default(uuid()) @db.Char(36)
+  name          String   @unique @db.VarChar(120)
+  cronExpression String  @db.VarChar(120)
+  timezone      String   @default("America/New_York") @db.VarChar(64)
+  enabled       Boolean  @default(true)
+  nextRunAt     DateTime? @db.DateTime(3)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+  runs          JobRun[]
+}
+
+model JobRun {
+  id             String      @id @default(uuid()) @db.Char(36)
+  taskId         String      @db.Char(36)
+  scheduledFor   DateTime    @db.DateTime(3)
+  status         JobStatus   @default(PENDING)
+  attempts       Int         @default(0)
+  leaseToken     String?     @db.Char(36)
+  leaseExpiresAt DateTime?   @db.DateTime(3)
+  startedAt      DateTime?   @db.DateTime(3)
+  completedAt    DateTime?   @db.DateTime(3)
+  error          String?     @db.Text
+  task           ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@unique([taskId, scheduledFor])
+  @@index([status, leaseExpiresAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Char(36)
+  userId    String?  @db.Char(36)
+  walletId  String?  @db.Char(36)
+  action    String   @db.VarChar(120)
+  target    String   @db.VarChar(120)
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  wallet    Wallet?  @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  @@index([walletId, createdAt])
+}
+
+model SystemEvent {
+  id        String   @id @default(uuid()) @db.Char(36)
+  severity  String   @db.VarChar(16)
+  source    String   @db.VarChar(64)
+  message   String   @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@index([severity, createdAt])
+}
+
+model ErrorEvent {
+  id        String   @id @default(uuid()) @db.Char(36)
+  source    String   @db.VarChar(64)
+  message   String   @db.Text
+  stack     String?  @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  @@index([source, createdAt])
+}
+
+model NotificationSettings {
+  id                  String   @id @default(uuid()) @db.Char(36)
+  scope               String   @unique @default("global") @db.VarChar(32)
+  webhookEnabled      Boolean  @default(false)
+  encryptedWebhookUrl String?  @db.Text
+  webhookUrlIv        String?  @db.VarChar(64)
+  webhookUrlTag       String?  @db.VarChar(64)
+  webhookKeyVersion   Int      @default(1)
+  webhookEvents       Json
+  emailEnabled        Boolean  @default(false)
+  emailRecipients     Json
+  emailEvents         Json
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+}
