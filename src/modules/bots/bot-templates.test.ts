@@ -10,7 +10,7 @@ describe("bot templates and operating modes", () => {
   });
 
   it("keeps the initial market universe fixed to ten liquid US symbols", () => {
-    expect(ALLOWED_TRADING_SYMBOLS).toEqual(["SPY", "QQQ", "IWM", "DIA", "XLK", "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"]);
+    expect(ALLOWED_TRADING_SYMBOLS).toEqual(["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AMD"]);
   });
 
   it("blocks activation while the Kill Switch is on", () => {
@@ -34,5 +34,10 @@ describe("bot templates and operating modes", () => {
     expect(shouldQueuePaperExecution("OFF", true)).toBe(false);
     expect(shouldQueuePaperExecution("PAPER_ACTIVE", false)).toBe(false);
     expect(shouldQueuePaperExecution("PAPER_ACTIVE", true)).toBe(true);
+  });
+
+  it("gives each personality concrete deterministic strategy parameters", () => {
+    expect(getBotTemplate("GUARDIAN").strategyProfile).toMatchObject({ minimumSignalScore: expect.any(Number), trendWeight: expect.any(Number) });
+    expect(getBotTemplate("EXPLORER").strategyProfile.minimumSignalScore).toBeLessThan(getBotTemplate("GUARDIAN").strategyProfile.minimumSignalScore);
   });
 });

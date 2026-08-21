@@ -79,6 +79,15 @@ model User {
   auditLogs    AuditLog[]
 }
 
+model LoginThrottle {
+  keyHash        String    @id @db.Char(64)
+  failures       Int       @default(0)
+  windowStartedAt DateTime @default(now()) @db.DateTime(3)
+  blockedUntil   DateTime? @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+  @@index([blockedUntil])
+}
+
 model Session {
   id        String   @id @default(uuid()) @db.Char(36)
   userId    String   @db.Char(36)
@@ -162,6 +171,7 @@ model BotInstance {
   capitalEvents  BotCapitalEvent[]
   proposals      TradeProposal[]
   watchlist      Watchlist[]
+  botPositions   BotPosition[]
   portfolioSnapshots PortfolioSnapshot[]
   @@index([walletId, status])
   @@index([cloneSourceId])
@@ -232,10 +242,26 @@ model MarketBar {
   low       Decimal  @db.Decimal(28, 12)
   close     Decimal  @db.Decimal(28, 12)
   volume    Decimal  @db.Decimal(28, 12)
+  tradeCount Int?
+  vwap      Decimal? @db.Decimal(28, 12)
   feed      String   @db.VarChar(24)
+  receivedAt DateTime @default(now()) @db.DateTime(3)
   createdAt DateTime @default(now()) @db.DateTime(3)
   @@unique([symbol, timeframe, timestamp, feed])
   @@index([symbol, timeframe, timestamp])
+}
+
+model MarketEvaluation {
+  id              String   @id @default(uuid()) @db.Char(36)
+  evaluationKey   String   @unique @db.VarChar(220)
+  botId           String   @db.Char(36)
+  symbol          String   @db.VarChar(16)
+  timeframe       String   @db.VarChar(16)
+  candleTimestamp DateTime @db.DateTime(3)
+  status          String   @default("CREATED") @db.VarChar(32)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  completedAt     DateTime? @db.DateTime(3)
+  @@index([botId, symbol, candleTimestamp])
 }
 
 model MarketSnapshot {
@@ -296,6 +322,7 @@ model TradeProposal {
   quantity    Decimal     @db.Decimal(28, 12)
   limitPrice  Decimal?    @db.Decimal(28, 12)
   estimatedPrice Decimal  @db.Decimal(28, 12)
+  reservationAmount Decimal @default(0) @db.Decimal(28, 12)
   status      String      @default("PENDING_RISK") @db.VarChar(32)
   context     Json
   createdAt   DateTime    @default(now()) @db.DateTime(3)
@@ -342,22 +369,38 @@ model Order {
   limitPrice    Decimal?    @db.Decimal(28, 12)
   status        OrderStatus @default(PENDING)
   rawPayload    Json?
+  reservationReleasedAt DateTime? @db.DateTime(3)
   createdAt     DateTime    @default(now()) @db.DateTime(3)
   updatedAt     DateTime    @updatedAt @db.DateTime(3)
   fills         Fill[]
   @@index([proposalId, createdAt])
 }
 
+model BotPosition {
+  id                String      @id @default(uuid()) @db.Char(36)
+  botId             String      @db.Char(36)
+  symbol            String      @db.VarChar(16)
+  quantity          Decimal     @db.Decimal(28, 12)
+  averageEntryPrice Decimal     @db.Decimal(28, 12)
+  updatedAt         DateTime    @updatedAt @db.DateTime(3)
+  bot               BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@unique([botId, symbol])
+  @@index([botId, updatedAt])
+}
+
 model Fill {
   id            String   @id @default(uuid()) @db.Char(36)
   orderId       String   @db.Char(36)
+  botId         String   @db.Char(36)
   brokerFillId  String   @unique @db.VarChar(128)
   quantity      Decimal  @db.Decimal(28, 12)
   price         Decimal  @db.Decimal(28, 12)
+  realizedPnl   Decimal  @default(0) @db.Decimal(28, 12)
   filledAt      DateTime @db.DateTime(3)
   createdAt     DateTime @default(now()) @db.DateTime(3)
   order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   @@index([orderId, filledAt])
+  @@index([botId, filledAt])
 }
 
 model Position {
@@ -505,4 +548,23 @@ model NotificationSettings {
   emailEvents         Json
   createdAt           DateTime @default(now()) @db.DateTime(3)
   updatedAt           DateTime @updatedAt @db.DateTime(3)
+}
+
+/// Administrator-managed defaults for the three editable limits of each bot
+/// personality. Existing bots retain their own saved policy until edited.
+model BotProfileDefault {
+  templateId String   @id @db.VarChar(24)
+  riskPolicy Json
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+  updatedAt  DateTime @updatedAt @db.DateTime(3)
+}
+
+/// App-level allocation envelope for the single Alpaca Paper account.
+/// Wallets are virtual portfolios; this row is never a second broker account.
+model PaperCapitalPool {
+  scope              String   @id @default("global") @db.VarChar(32)
+  managedCapital     Decimal  @default(100) @db.Decimal(28, 12)
+  unallocatedCapital Decimal  @default(100) @db.Decimal(28, 12)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+  updatedAt          DateTime @updatedAt @db.DateTime(3)
 }

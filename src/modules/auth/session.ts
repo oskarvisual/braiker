@@ -1,17 +1,58 @@
 import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { passwordPolicyError } from "@/modules/auth/authorization";
+import { nextLoginThrottle } from "@/modules/auth/login-throttle";
+import { temporaryPasswordAccessError } from "@/modules/auth/session-policy";
 
 const COOKIE_NAME = "braiker_session";
 const SESSION_DAYS = 7;
 
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
-export async function authenticate(email: string, password: string): Promise<{ token: string; userId: string; role: string } | null> {
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) return null;
+const loginThrottleHash = (kind: "email" | "ip", value: string) => createHash("sha256").update(`${kind}:${value.trim().toLowerCase()}`).digest("hex");
+const LOGIN_IDENTITY_LIMIT = 5;
+const LOGIN_IP_LIMIT = 20;
+
+type AuthenticationSuccess = { token: string; userId: string; role: string };
+type AuthenticationBlocked = { blocked: true };
+
+async function isLoginBlocked(keys: string[], now: Date) {
+  const throttles = await prisma.loginThrottle.findMany({ where: { keyHash: { in: keys }, blockedUntil: { gt: now } }, select: { keyHash: true } });
+  return throttles.length > 0;
+}
+
+async function recordLoginOutcome(keys: Array<{ key: string; limit: number }>, succeeded: boolean, now: Date) {
+  await prisma.$transaction(async (tx) => {
+    for (const item of [...keys].sort((left, right) => left.key.localeCompare(right.key))) {
+      await tx.$queryRaw`SELECT \`keyHash\` FROM \`LoginThrottle\` WHERE \`keyHash\` = ${item.key} FOR UPDATE`;
+      const current = await tx.loginThrottle.findUnique({ where: { keyHash: item.key } });
+      const next = nextLoginThrottle(
+        current ?? { failures: 0, windowStartedAt: now, blockedUntil: null },
+        succeeded,
+        now,
+        item.limit
+      );
+      await tx.loginThrottle.upsert({
+        where: { keyHash: item.key },
+        create: { keyHash: item.key, failures: next.failures, windowStartedAt: next.windowStartedAt, blockedUntil: next.blockedUntil },
+        update: { failures: next.failures, windowStartedAt: next.windowStartedAt, blockedUntil: next.blockedUntil }
+      });
+    }
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function authenticate(email: string, password: string, clientIp = "unknown", options: { throttle?: boolean } = {}): Promise<AuthenticationSuccess | AuthenticationBlocked | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const throttleKeys = [{ key: loginThrottleHash("email", normalizedEmail), limit: LOGIN_IDENTITY_LIMIT }, { key: loginThrottleHash("ip", clientIp), limit: LOGIN_IP_LIMIT }];
+  const now = new Date();
+  if (options.throttle !== false && await isLoginBlocked(throttleKeys.map((item) => item.key), now)) return { blocked: true };
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  const succeeded = Boolean(user && await bcrypt.compare(password, user.passwordHash));
+  if (options.throttle !== false) await recordLoginOutcome(throttleKeys, succeeded, now);
+  if (!user || !succeeded) return null;
   const token = randomBytes(32).toString("base64url");
   await prisma.session.create({ data: { userId: user.id, tokenHash: tokenHash(token), expiresAt: new Date(Date.now() + SESSION_DAYS * 86_400_000) } });
   return { token, userId: user.id, role: user.role };
@@ -50,9 +91,13 @@ export async function revokeSessionFromCookie() {
   await clearSessionCookie();
 }
 
-export async function requireUser() {
+export async function requireUser(options: { allowTemporaryPassword?: boolean } = {}) {
   const user = await currentUser();
   if (!user) throw new Error("UNAUTHENTICATED");
+  if (!options.allowTemporaryPassword) {
+    const error = temporaryPasswordAccessError(user);
+    if (error) throw new Error(error);
+  }
   return user;
 }
 

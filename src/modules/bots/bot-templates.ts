@@ -1,19 +1,20 @@
 import type { RiskPolicy } from "@/modules/risk/types";
+import type { StrategyProfile } from "@/modules/strategy/trend-strategy";
 import type { BotLifeStatus, BotStatus } from "@prisma/client";
 
-export const ALLOWED_TRADING_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "XLK", "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"] as const;
+export const ALLOWED_TRADING_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AMD"] as const;
 export type AllowedTradingSymbol = typeof ALLOWED_TRADING_SYMBOLS[number];
 export type BotTemplateId = "GUARDIAN" | "NAVIGATOR" | "EXPLORER";
 export type BotRunMode = "OFF" | "PAPER_ACTIVE";
 
-type BotTemplate = { id: BotTemplateId; name: string; description: string; avatar: string; riskPolicy: RiskPolicy };
+type BotTemplate = { id: BotTemplateId; name: string; description: string; avatar: string; riskPolicy: RiskPolicy; strategyProfile: Omit<StrategyProfile, "id"> };
 
 const neverTradeRisk = { allowMargin: false, allowShorting: false, allowOptions: false, allowLeverage: false, marketOrderBufferPct: "0.02" } as const;
 
 const templates: BotTemplate[] = [
-  { id: "GUARDIAN", name: "Guardian", description: "Conservative: fewer trades, lower exposure, stronger confirmation.", avatar: "shield", riskPolicy: { maxPositionSize: "5", maxPortfolioExposure: "20", maxDailyLoss: "1", maxWeeklyLoss: "3", maxTradesPerDay: 2, ...neverTradeRisk } },
-  { id: "NAVIGATOR", name: "Navigator", description: "Balanced: measured opportunities with moderate exposure.", avatar: "compass", riskPolicy: { maxPositionSize: "10", maxPortfolioExposure: "35", maxDailyLoss: "2", maxWeeklyLoss: "6", maxTradesPerDay: 4, ...neverTradeRisk } },
-  { id: "EXPLORER", name: "Explorer", description: "Dynamic: more candidate signals, within strict paper-only limits.", avatar: "spark", riskPolicy: { maxPositionSize: "15", maxPortfolioExposure: "50", maxDailyLoss: "3", maxWeeklyLoss: "10", maxTradesPerDay: 6, ...neverTradeRisk } }
+  { id: "GUARDIAN", name: "Guardian", description: "Conservative: fewer trades, lower exposure, stronger confirmation.", avatar: "shield", riskPolicy: { maxPositionSize: "5", maxPortfolioExposure: "20", maxDailyLoss: "1", maxWeeklyLoss: "3", maxTradesPerDay: 2, ...neverTradeRisk }, strategyProfile: { minimumSignalScore: 0.85, trendWeight: 0.35, momentumWeight: 0.25, volumeWeight: 0.15, marketContextWeight: 0.25, volatilityPenalty: 0.2 } },
+  { id: "NAVIGATOR", name: "Navigator", description: "Balanced: measured opportunities with moderate exposure.", avatar: "compass", riskPolicy: { maxPositionSize: "10", maxPortfolioExposure: "35", maxDailyLoss: "2", maxWeeklyLoss: "6", maxTradesPerDay: 4, ...neverTradeRisk }, strategyProfile: { minimumSignalScore: 0.65, trendWeight: 0.3, momentumWeight: 0.25, volumeWeight: 0.2, marketContextWeight: 0.15, volatilityPenalty: 0.1 } },
+  { id: "EXPLORER", name: "Explorer", description: "Dynamic: more candidate signals, within strict paper-only limits.", avatar: "spark", riskPolicy: { maxPositionSize: "15", maxPortfolioExposure: "50", maxDailyLoss: "3", maxWeeklyLoss: "10", maxTradesPerDay: 6, ...neverTradeRisk }, strategyProfile: { minimumSignalScore: 0.55, trendWeight: 0.25, momentumWeight: 0.3, volumeWeight: 0.25, marketContextWeight: 0.1, volatilityPenalty: 0.05 } }
 ];
 
 export function listBotTemplates() { return templates; }

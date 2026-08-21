@@ -19,6 +19,7 @@ const schema = z.object({
   SMTP_USER: z.string().default(""),
   SMTP_PASSWORD: z.string().default(""),
   SMTP_FROM: z.string().default(""),
+  METRICS_TOKEN: z.string().refine((value) => value === "" || value.length >= 32).default(""),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info")
 });
 

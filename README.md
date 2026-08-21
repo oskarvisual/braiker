@@ -19,26 +19,40 @@ Implemented today:
 
 - Cookie-session authentication; Admin, Operator, and Viewer roles.
 - Admin user management and password change flow.
-- MySQL-backed wallets, encrypted Alpaca Paper connections, and scheduled portfolio reconciliation.
+- One server-only Alpaca Paper connection from `.env`, virtual wallets with a shared global capital pool, and scheduled global portfolio reconciliation.
 - Admin-managed alert preferences: independently selected webhook/email events, encrypted webhook destinations, and SMTP environment readiness.
 - Global, dismissible action feedback through toasts, so an error from a modal is never rendered elsewhere on the page.
 - A fixed operational sidebar and a compact top account menu for Settings, user administration, password management, and sign-out.
 - Dashboard with Alpaca equity/cash, a seven-day account chart, positions, broker orders, and allocated bot capital.
 - Order-first History with lifecycle and bot filters, plus a read-only per-bot detail/history page.
-- Three bot profiles: Guardian, Navigator, Explorer; per-bot name, avatar, budget, symbols, instruction, and bounded risk limits.
+- Three bot profiles: Guardian, Navigator, Explorer; Admin-editable defaults for position, daily-loss, and trade-count caps, plus per-bot name, avatar, budget, symbols, instruction, and bounded risk limits.
 - Atomic budget allocation and adjustments, per-bot capital events, cloning with source lineage, `DEAD`-state guards, concurrent ON/OFF control for independently funded bots, and audit logs.
 - Persistent scheduler leases, health/readiness endpoints, Prometheus metrics, and worker heartbeats.
+- A shared, once-per-minute market cycle for ON bots: Alpaca IEX minute bars and quotes are persisted, closed candles are deduplicated, and each bot is evaluated once per candle.
+- Deterministic `trend-v1` strategy with EMA, RSI, ATR, momentum, relative-volume, and SPY/QQQ regime context. It produces auditable `BUY`, `SELL`, or `HOLD` signals; AI is not in the execution path.
+- Paper-only proposal → risk decision → idempotent Alpaca order flow. Confirmed terminal broker outcomes reconcile fills, per-bot virtual cash, reservations, bot positions, capital events, and permanent death safeguards.
+- Security boundaries: realized daily/weekly loss is calculated from durable attributed fills; virtual-capital reservations use an atomic MySQL condition; terminal reconciliation and Kill Switch/order submission share row-lock boundaries; temporary passwords cannot access privileged APIs; login attempts are throttled; and metrics require an Admin session or bearer token.
 
 Not implemented yet:
 
-- A market-data stream, strategy runner, backtesting, or automatic signal generation.
-- The capital-accounting transition that automatically marks a zero-capital bot `DEAD`; the model and guards exist, but this transition is not yet wired into a capital update path.
 - AI provider integration, RAG, bot chat, or autonomous learning.
-- Decision reports beyond the implemented order lifecycle/history views, including explainable decision snapshots and richer per-bot portfolio/P&L reporting.
+- A persistent Alpaca WebSocket stream. The current market collector uses an intentionally conservative REST bar/quote cycle; WebSocket delivery, reconnect/backfill telemetry, and backtests are the next market-data hardening work.
+- Rich decision reporting in the UI. Decision snapshots, signals, proposals, risk decisions, orders, fills, and capital events are persisted, but the dashboard/history does not yet present the full causal timeline.
 - Webhook/email alert delivery. Preferences and destinations can be configured, but delivery waits for durable event dispatch and SMTP configuration.
 - Live trading or any broker besides Alpaca Paper.
 
-Turning a bot ON currently changes its durable operating state; it does **not** by itself start an autonomous strategy or place an order.
+Turning a bot ON permits the worker's shared market cycle to evaluate its configured symbols. A trade is still possible only when the deterministic strategy produces a candidate and the persisted risk engine approves it. This remains Alpaca Paper only.
+
+## Personal Paper wallet model
+
+Personal mode has exactly one Alpaca Paper account. `ALPACA_API_KEY` and `ALPACA_API_SECRET` are read only by server-side code from `.env`; BrAIker never asks for them when creating a wallet.
+
+- A **wallet** is a virtual portfolio inside BrAIker, not another Alpaca account.
+- **Global Paper capital** is the safety envelope enabled for BrAIker. It is capped by the Paper account's reported cash when changed in Settings.
+- Creating a wallet reserves part of the currently unassigned global capital. Bots then reserve capital only inside their own wallet.
+- Settings can add capital to a wallet from the global pool or release only that wallet's unassigned capital back to the pool. Capital already assigned to bots cannot be released until it is returned by the relevant bot.
+- Settings can edit the three starting limits of each personality for future bots. Existing bots keep their stored policy until their own configuration is saved; the editor may then set those three limits up to the current personality default. Permanent paper-only safety boundaries remain fixed.
+- This accounting does not move money at Alpaca. Reconciliation reads the single broker account once and attributes BrAIker orders to their originating bot/wallet through the internal order trace.
 
 ## Requirements
 
@@ -87,7 +101,10 @@ npm run prisma:generate
 npx prisma validate
 curl http://localhost:3000/api/health
 curl http://localhost:3000/api/ready
+npm run paper:soak:check
 ```
+
+When the local web app uses another port, set `BRAIKER_URL` first; for example: `BRAIKER_URL=http://localhost:3001 npm run paper:soak:check`.
 
 ## Project map
 
@@ -102,6 +119,7 @@ curl http://localhost:3000/api/ready
 | Engineering rules | `AGENTS.md` |
 | Product truth / handoff | `docs/PROJECT_CONTEXT.md` |
 | Architecture and data contracts | `docs/ARCHITECTURE.md` |
+| Local Paper soak procedure | `docs/PAPER_SOAK_RUNBOOK.md` |
 
 ## Quality gate
 
@@ -120,3 +138,7 @@ Material changes must also update the repository handoff through the [`braiker-d
 ## Deployment
 
 `docker compose up -d --build` runs only `web` and `worker`; MySQL remains external and is referenced by `DATABASE_URL`. Backups, TLS to MySQL, firewalling, secret management, and external uptime monitoring remain deployment responsibilities.
+
+The Docker build context is intentionally filtered by `.dockerignore`: `.env`, `.env.*`, `.next`, `dist`, local dependencies, VCS metadata, and logs never enter an image build context. Supply runtime secrets through the deployment platform only.
+
+For DigitalOcean App Platform, deploy one App with two components: a public `web` service and a private `worker`. Give both the same server-only environment variables and external MySQL connection; keep exactly one worker instance during the Paper soak.

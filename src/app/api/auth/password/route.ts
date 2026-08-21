@@ -11,10 +11,10 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const body = bodySchema.safeParse(await request.json());
     if (!body.success) return NextResponse.json({ error: "Invalid password format" }, { status: 400 });
-    const user = await requireUser();
+    const user = await requireUser({ allowTemporaryPassword: true });
     await changePassword({ userId: user.id, currentPassword: body.data.currentPassword, nextPassword: body.data.nextPassword });
-    const replacementSession = await authenticate(user.email, body.data.nextPassword);
-    if (!replacementSession) throw new Error("SESSION_REPLACEMENT_FAILED");
+    const replacementSession = await authenticate(user.email, body.data.nextPassword, "password-change", { throttle: false });
+    if (!replacementSession || "blocked" in replacementSession) throw new Error("SESSION_REPLACEMENT_FAILED");
     await setSessionCookie(replacementSession.token);
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -18,14 +18,16 @@ If a request conflicts with these rules, stop and explain the conflict instead o
 2. Alpaca Paper is the only broker. Do not add crypto, Binance, live mode, margin, shorting, leverage, options, or extended-hours trading.
 3. Money is persisted and compared with decimal strings / Prisma `Decimal`, never JavaScript floating point.
 4. Every business query is scoped by wallet access. MySQL has no row-level security; repository/API authorization is the enforcement boundary.
-5. Broker credentials are encrypted with AES-256-GCM in application storage. They never reach the browser, logs, AI providers, tests, or committed files.
-6. Risk and kill-switch checks are enforced before execution. An execution retry must be idempotent through proposal/job state and Alpaca `client_order_id` lookup.
+5. In Personal Paper mode, the one Alpaca Paper credential pair is server-only in `.env`. It never reaches the browser, logs, AI providers, tests, or committed files. Legacy encrypted `BrokerConnection` records are retained only for future multi-account migration and are not used by the current worker.
+6. Risk and Kill Switch checks are enforced at the execution boundary. The execution transaction locks the bot row through idempotent Alpaca `client_order_id` recovery/submission; bot controls lock that same row. Therefore a persisted OFF/Kill Switch blocks new submissions, while a submission already linearized first completes idempotently before OFF is saved.
+7. Realized daily and rolling-week losses come only from durable, bot-attributed fill P&L. Pending proposals atomically reserve the bot's available virtual capital in MySQL; competing proposals cannot overbook it. Terminal reconciliation claims each order once and locks the bot before changing cash or reservations.
+8. A temporary-password user may only change their password or sign out. Login is persistently throttled by hashed identity/IP keys, and `/api/metrics` requires an Admin session or a configured bearer token.
 
 ## Bot model
 
 ### Personality profiles
 
-There are exactly three initial personalities. Their risk caps are upper bounds; a bot may be configured lower but never higher.
+There are exactly three initial personalities. Settings persists the three editable default caps (position, daily loss, and trades/day) in `BotProfileDefault`; they are upper bounds for new bots and for later edits to a bot. A bot may be configured lower but never higher than its current personality default.
 
 | Profile | Intent | Max position | Max trades/day |
 | --- | --- | ---: | ---: |
@@ -33,11 +35,13 @@ There are exactly three initial personalities. Their risk caps are upper bounds;
 | Navigator | Balanced, moderate exposure | $10 | 4 |
 | Explorer | Dynamic, more candidates inside strict limits | $15 | 6 |
 
-The user may create multiple bots from the same personality, assign each a name, and add per-bot instructions. These instructions are stored as configuration/memory but must never change the risk boundary.
+The initial values shown in the table are defaults, not hard-coded product behavior. An Admin may edit them in Settings within the personality's permanent envelope: the static portfolio-exposure and weekly-loss boundaries remain fixed, the daily limit cannot exceed the weekly limit, and trades/day cannot exceed twice the base-profile default. Existing bots are not changed automatically; their saved policy remains in force until they are explicitly edited. The user may create multiple bots from the same personality, assign each a name, and add per-bot instructions. These instructions are stored as configuration/memory but must never change the risk boundary.
 
 ### Capital, survival, and death
 
-- A wallet has `managedCapital` and `unallocatedCapital`.
+- `PaperCapitalPool(scope="global")` is the app-level capital envelope for the single Alpaca Paper account. It has managed and unallocated capital and must never exceed Alpaca's reported cash when changed.
+- A wallet is a virtual portfolio; it has `managedCapital` and `unallocatedCapital`, but it is not a broker account and never owns credentials in Personal Paper mode.
+- Creating a wallet atomically transfers its requested virtual capital from `PaperCapitalPool.unallocatedCapital` into the wallet. An Admin can later add capital from that pool or release only the wallet's unallocated capital back to it; no adjustment may take capital already assigned to bots. These moves are serialized and audited.
 - Creating a bot atomically transfers its requested budget from unallocated wallet capital to that bot's `initialCapital` and `currentCapital`.
 - Capital events are recorded. An Admin may add unallocated wallet capital to an active bot or return part of its current capital to the same wallet. A live bot must retain positive capital; to return all of it, turn the bot OFF and delete it. A bot cannot use another bot's money.
 - Survival is always enabled. It is not a profile setting and must not appear as an optional switch.
@@ -63,7 +67,7 @@ Do not bring back Simulation, a Paper button/tag, a separate enable button, or a
 - `/setup` — Admin bot listing and add/edit/clone modal. It shows current bot capital, risk limits, allowed symbols, and one ON/OFF switch. Active bots can move capital to/from their wallet; dead bots expose history and cloning only. Clicking a bot name or eye icon opens its full-width order-history modal.
 - `/activity` — order-first History. It filters by lifecycle (`Open`, `In progress`, `Closed`, `Rejected`), bot, and symbol/status text. BrAIker orders link to `/bots/[botId]`; Alpaca orders without an internal link are explicitly shown as external/no bot linked.
 - `/bots/[botId]` — read-only bot detail: configured universe, capital/status, and that bot's recorded BrAIker orders. A dead bot remains history-only.
-- `/settings` — Admin wallet connection/configuration, sync interval, alert preferences, and profile reference cards. Webhooks and email each choose their destination and alert events independently. Webhook destinations are encrypted and never shown again. It is reached through the top account menu, not the sidebar.
+- `/settings` — Admin global Paper-capital, virtual wallet creation and per-wallet budget management, sync interval, alert-preference, and profile configuration. Profile defaults affect new bots; bot-specific risk limits are edited from the existing bot's three-step editor. It never asks for Alpaca credentials because Personal Paper mode reads the single pair from `.env`. Webhooks and email each choose their destination and alert events independently. Webhook destinations are encrypted and never shown again. It is reached through the top account menu, not the sidebar.
 - `/admin/users` — Admin user CRUD, reached through the top account menu.
 - `/account/password` — password change.
 
@@ -73,26 +77,38 @@ Bot creation must show the selected wallet's unallocated capital before submissi
 
 The bot modal is a three-step wizard. Navigation is non-persistent: it must never save or close because the user presses Enter in a field. Only the explicit final Create/Save button may persist the bot and close the modal.
 
+## Implemented market and execution foundation
+
+- The worker runs a leased `market-cycle` once per minute. It checks the one Alpaca Paper market clock, reconciles the global account once, loads all active bots, and fetches shared Alpaca IEX one-minute bars plus latest quotes for the union of permitted symbols and `SPY`/`QQQ`.
+- Only completed candles are persisted/evaluated. `MarketEvaluation.evaluationKey` makes an evaluation idempotent per bot, symbol, timeframe, and candle timestamp.
+- `trend-v1` is deterministic: EMA trend, RSI, ATR, momentum, relative volume, and SPY/QQQ regime create `BUY`, `SELL`, or `HOLD`. Each pass persists a market snapshot and strategy signal.
+- A candidate goes through the existing risk engine, then an idempotent execution job. `client_order_id` is recovered from Alpaca before a retry submits an order.
+- Reconciliation records broker snapshots and terminal fills. Virtual cash, reservations, and `BotPosition` are attributed to exactly one bot; a zero-cash bot with no remaining position becomes permanently `DEAD`, is switched OFF, and retains its trace.
+
+The design intent is survival, not maximum activity: no strategy, prompt, or profile can bypass risk, capital isolation, the kill switch, or permanent death semantics.
+
 ## What is deliberately not finished
 
 Do not claim these exist or wire placeholders that imply they do:
 
-1. Market stream manager, bar persistence/backfill, indicators, strategies, or a backtest runner.
-2. Automated proposal generation. The execution path exists for future approved proposals, but the current UI does not generate them.
-3. Automatic capital accounting that transitions a zero-capital bot to `DEAD`. The schema, pure `botLifeStatus` policy, and operational guards exist, but no current service persists this transition yet.
-4. AI analysis, OpenAI adapter, RAG, bot conversation, memory retrieval, cost tracking, or bot learning loop.
-5. Decision reports beyond the current order history: explainable decision snapshots, proposals/risk reasoning, and richer portfolio/P&L reporting per bot.
-6. Alert delivery. Notification preferences and destinations are persisted now, but no worker dispatches webhook/email messages until durable event semantics and delivery/retry handling are implemented. SMTP configuration remains environment-only.
+1. Persistent Alpaca WebSocket streaming, explicit reconnect/backfill telemetry, and a backtest runner. Current bar/quote collection is REST-based and deliberately bounded to the shared minute cycle.
+2. AI analysis, OpenAI adapter, RAG, bot conversation, memory retrieval, cost tracking, or bot learning loop.
+3. Decision reports beyond the current order history: the decision data is persisted but the UI does not yet render the full snapshot → signal → risk → order → fill causal view.
+4. Alert delivery. Notification preferences and destinations are persisted now, but no worker dispatches webhook/email messages until durable event semantics and delivery/retry handling are implemented. SMTP configuration remains environment-only.
 
 ## Next product milestones
 
 Prioritize in this order unless the user explicitly reprioritizes:
 
-1. Add a carefully scoped strategy/market-data foundation with reproducible data and no order submission by default.
-2. Add decision traceability: market snapshot → indicators → deterministic signal → risk decision → execution lifecycle.
+1. Add persistent market-stream reconnect/backfill behavior and reproducible backtests without weakening the existing REST cycle safeguards.
+2. Render decision traceability: market snapshot → indicators → deterministic signal → risk decision → execution lifecycle.
 3. Add notification delivery only after durable event semantics exist.
 4. Add richer per-bot decision reports and portfolio/P&L views.
 5. Add optional AI analysis behind validated, auditable, non-privileged adapters.
+
+## Paper soak entry criteria
+
+Before an unattended local soak, run `npm run test`, `npm run typecheck`, `npm run build`, `npm run prisma:generate`, `npx prisma validate`, and `npm run paper:soak:check`; also run the isolated MySQL security integration suite with `BRAIKER_TEST_DATABASE_URL` set to a disposable database. Make a manual dashboard sync and verify the worker heartbeat/`/api/ready`. Keep one worker process only. Use a small global Paper-capital envelope, confirm virtual wallet/bot allocation totals, and review broker/order attribution after every fill. Follow [`PAPER_SOAK_RUNBOOK.md`](PAPER_SOAK_RUNBOOK.md) for daily checks and stop conditions. Do not promote this deployment to live trading: live requires a separate deployment, database, secrets, and security review.
 
 ## UI principles
 

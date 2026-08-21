@@ -1,4 +1,4 @@
-import { BotRunMode, BotStatus, UserRole } from "@prisma/client";
+import { BotRunMode, BotStatus, Prisma, PrismaClient, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateBotModeChange } from "@/modules/bots/bot-templates";
 
@@ -14,8 +14,14 @@ export function resolveBotPowerChange(action: BotControl) {
     : { runMode: BotRunMode.OFF, killSwitch: true };
 }
 
-export async function applyBotControl(input: { botId: string; actorId: string; actorRole: UserRole; action: BotControl }) {
-  return prisma.$transaction(async (tx) => {
+export async function applyBotControl(input: { botId: string; actorId: string; actorRole: UserRole; action: BotControl; db?: PrismaClient }) {
+  const db = input.db ?? prisma;
+  return db.$transaction(async (tx) => {
+    // This is the same lock acquired by execution immediately before its
+    // idempotent broker submission. It gives the kill switch a clear ordering:
+    // an execution either observes it before submission, or completes its
+    // already-started idempotent submission before the switch is persisted.
+    await tx.$queryRaw`SELECT \`id\` FROM \`BotInstance\` WHERE \`id\` = ${input.botId} FOR UPDATE`;
     const bot = await tx.botInstance.findUnique({ where: { id: input.botId } });
     if (!bot) throw new Error("BOT_NOT_FOUND");
     if (input.actorRole !== "ADMIN") {
@@ -34,5 +40,5 @@ export async function applyBotControl(input: { botId: string; actorId: string; a
     if (previousStatus !== nextStatus) await tx.botStateTransition.create({ data: { botId: bot.id, fromState: previousStatus, toState: nextStatus, reason: input.action } });
     await tx.auditLog.create({ data: { userId: input.actorId, walletId: bot.walletId, action: `BOT_${input.action}`, target: bot.id } });
     return updated;
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

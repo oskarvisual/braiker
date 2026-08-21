@@ -10,8 +10,9 @@ Browser
 Node worker
   ├─ node-cron tickers
   ├─ MySQL-backed task leases
-  ├─ Alpaca Paper reconciliation
-  └─ future execution-job processing
+  ├─ one global Alpaca Paper reconciliation
+  ├─ shared minute market-data / strategy cycle
+  └─ execution-job processing
        └─ Alpaca Paper REST API
 ```
 
@@ -22,8 +23,8 @@ Docker Compose is intentionally limited to `web` and `worker`. MySQL is external
 | Component | Owns | Must not do |
 | --- | --- | --- |
 | Web | UI, session auth, RBAC, configuration APIs, read models, manual sync trigger | expose credentials, open broker WebSockets, create an execution side effect from the browser |
-| Worker | bootstrap Admin, scheduler leases, reconciliation, worker heartbeat, future market stream and execution jobs | run with live configuration, bypass risk checks, trust browser input as authorization |
-| MySQL | durable domain state, audit state, schedules, leases, snapshots, encrypted connection fields | contain plaintext broker secrets |
+| Worker | bootstrap Admin, scheduler leases, reconciliation, shared market cycle, execution jobs, worker heartbeat | run with live configuration, bypass risk checks, trust browser input as authorization |
+| MySQL | durable domain state, audit state, schedules, leases, snapshots, virtual wallet allocations | contain plaintext broker secrets |
 
 ## Scheduler
 
@@ -33,7 +34,8 @@ Docker Compose is intentionally limited to `web` and `worker`. MySQL is external
 - `job_runs`: run identity, attempts, leases, timestamps, errors.
 - Lease recovery runs every minute.
 - Portfolio reconciliation is provisioned every five minutes by default and can be changed in Settings.
-- The worker processes one execution job every 30 seconds; no UI currently creates proposals/jobs automatically.
+- The leased `market-cycle` runs once per minute and processes all eligible bots in one global Paper-account pass; it must never become a cron job per bot or per virtual wallet.
+- The worker processes one execution job every 30 seconds. An ON bot can create a proposal only through the deterministic market cycle and risk engine.
 
 Workers claim recoverable work with conditional MySQL updates. Never replace this with an in-memory-only scheduler, system cron, Redis, or an untracked queue.
 
@@ -51,10 +53,10 @@ Workers claim recoverable work with conditional MySQL updates. Never replace thi
 | Domain | Primary models |
 | --- | --- |
 | Identity | `User`, `Session`, `WalletMember`, `AuditLog` |
-| Wallet/broker | `Wallet`, `BrokerConnection` |
-| Bots | `BotInstance` (including optional `cloneSourceId` lineage), `BotCapitalEvent`, `BotMemoryEntry`, `BotModeTransition`, `BotStateTransition`, `Watchlist` |
+| Wallet/broker | `PaperCapitalPool`, `Wallet`, `BrokerConnection` (legacy/future multi-account only) |
+| Bots | `BotProfileDefault` (three editable personality caps), `BotInstance` (including optional `cloneSourceId` lineage), `BotCapitalEvent`, `BotMemoryEntry`, `BotModeTransition`, `BotStateTransition`, `Watchlist` |
 | Market/decision | `MarketBar`, `MarketSnapshot`, `MarketStreamEvent`, `StrategySignal`, `AiDecision`, `TradeProposal`, `RiskDecision` |
-| Execution/portfolio | `ExecutionJob`, `Order`, `Fill`, `Position`, `BrokerOrderSnapshot`, `PortfolioSnapshot`, `DailyPerformance`, `ReconciliationRun` |
+| Execution/portfolio | `MarketEvaluation`, `ExecutionJob`, `Order`, `Fill`, `BotPosition`, `Position`, `BrokerOrderSnapshot`, `PortfolioSnapshot`, `DailyPerformance`, `ReconciliationRun` |
 | Operations | `ScheduledTask`, `JobRun`, `SystemEvent`, `ErrorEvent`, `NotificationSettings` |
 
 Before changing the schema, inspect `prisma/schema.prisma` and use an additive, versioned migration. Do not point destructive tests to the local development database.
@@ -62,6 +64,7 @@ Before changing the schema, inspect `prisma/schema.prisma` and use an additive, 
 ## Authentication and authorization
 
 - Sessions are opaque, hashed tokens stored in MySQL and carried via secure cookies.
+- `LoginThrottle` keeps only SHA-256 identity/IP keys, failure counts, window start, and block expiry. It is updated in a serializable transaction. Temporary-password users are restricted to password change/sign-out until `mustChangePassword` is cleared.
 - Global roles: `ADMIN`, `OPERATOR`, `VIEWER`.
 - Wallet membership adds wallet-specific roles. All wallet resources must check membership (Admins are the only cross-wallet administrative exception where implemented).
 - `VIEWER` can read only; configuration and bot setup are Admin-only today.
@@ -71,9 +74,9 @@ Do not infer permission from a wallet/bot UUID supplied by a request.
 
 ## Broker credential handling
 
-`BrokerConnection` fields are encrypted independently (ciphertext, IV, tag, key version) using AES-256-GCM. The master encryption key is `APP_ENCRYPTION_KEY` and stays in environment/secrets storage.
+Personal Paper mode reads the one Alpaca API key/secret directly from server-only environment variables. It does not persist, duplicate, or request per-wallet credentials. `BrokerConnection` fields remain encrypted independently (ciphertext, IV, tag, key version) using AES-256-GCM for a future multi-account migration only. The master encryption key is `APP_ENCRYPTION_KEY` and stays in environment/secrets storage.
 
-The worker and server-side sync code can decrypt only when required. Browser responses expose configuration status, never API key or secret values. Webhook destinations use the same AES-256-GCM storage pattern through `NotificationSettings`; the browser gets only whether a destination is configured, never its URL.
+Browser responses expose configuration status, never API key or secret values. Webhook destinations use the AES-256-GCM storage pattern through `NotificationSettings`; the browser gets only whether a destination is configured, never its URL.
 
 ## Bot state rules
 
@@ -86,9 +89,22 @@ TURN_OFF → runMode OFF,          killSwitch true,  status PAUSED
 
 Activation fails for a dead bot, a halted/error/maintenance bot, or a bot with a retained kill switch. Several independently funded bots may be active in the same wallet. Death is immutable. These must remain negative tests.
 
-Current implementation caveat: `botLifeStatus()` defines zero capital as `DEAD` and all dead-state guards are in place, but the automatic persistence of that state during future capital accounting is not yet implemented. Add it before any automated capital-changing execution flow is enabled.
+The broker reconciliation is the authoritative fill-accounting boundary. Terminal Alpaca outcomes lock the internal order, conditionally claim its reservation once, lock only the proposal bot, create idempotent attributed fills (including `realizedPnl`), update only that bot's virtual cash/reservation and `BotPosition`, and mark it `DEAD` when its virtual cash is exhausted with no position remaining. Death turns it OFF and is never reversible. This keeps concurrent reconciliations from overwriting a capital/reservation update.
+
+Proposal creation computes a `TradeProposal.reservationAmount` with `Prisma.Decimal`; an atomic conditional `UPDATE` reserves it only when `(currentCapital - reservedCapital)` is sufficient and the bot is eligible. The risk engine reads daily and rolling-week P&L from `Fill.realizedPnl`, never from a float calculation or an in-memory counter.
+
+Execution claims a job then enters a serializable transaction, locks the proposal bot, evaluates the persistent Kill Switch/risk state, and holds that lock through the idempotent `client_order_id` lookup/submission. `TURN_OFF` uses the same lock. The resulting ordering prevents a stale pre-flight Kill Switch check from submitting an order after OFF is persisted.
 
 The Prisma `BotRunMode.SIMULATION` value is a historical compatibility value. It is not an allowed new control action and should only be handled safely as inactive legacy data.
+
+## Personality-default configuration
+
+The static Guardian/Navigator/Explorer templates retain their strategy weights and permanent paper-only safety envelope. `BotProfileDefault` stores only the Admin-configurable position, daily-loss, and trades/day values. It is merged with the static template at read time.
+
+- Settings changes affect new bots immediately; they do not silently rewrite `BotInstance.riskPolicy` for existing bots.
+- When an existing bot is saved, its three risk inputs may be adjusted up to the current configured cap for its personality.
+- The configured position cannot exceed the static `maxPortfolioExposure`; daily loss cannot exceed static `maxWeeklyLoss`; trades/day cannot exceed twice the static template count. Margin, shorting, options, leverage, portfolio exposure, weekly loss, and order buffer stay non-configurable.
+- `PUT /api/settings/bot-profiles` is Admin-only, same-origin, audited, validates decimal values, and upserts the selected template override. `getConfiguredBotTemplate` is the required source for bot create/update limits; do not use a static template for those paths.
 
 ## APIs and pages
 
@@ -98,8 +114,8 @@ The Prisma `BotRunMode.SIMULATION` value is a historical compatibility value. It
 | Dashboard | `/`, `/api/dashboard/overview`, `/api/dashboard/sync` | sync is Admin-only |
 | Bots | `/setup`, `/api/bots`, `/api/bots/[botId]`, `/api/bots/[botId]/control`, `/api/bots/[botId]/capital`, `/api/bots/[botId]/history` | UI control body is `TURN_ON` or `TURN_OFF` only; Admin capital adjustments are serialized and history is authorized per wallet |
 | Users | `/admin/users`, `/api/admin/users/*` | Admin only |
-| Settings | `/settings`, `/api/wallets/*`, `/api/settings/synchronization`, `/api/settings/notifications` | wallet/broker, schedule, and persisted alert preferences |
-| Diagnostics | `/api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, Prometheus |
+| Settings | `/settings`, `/api/wallets`, `/api/wallets/[walletId]/capital`, `/api/settings/paper-capital`, `/api/settings/synchronization`, `/api/settings/notifications` | global Paper capital, serialized virtual-wallet budget changes, schedule, and persisted alert preferences |
+| Diagnostics | `/api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, Prometheus; metrics needs an Admin session or `Authorization: Bearer $METRICS_TOKEN` |
 | History | `/activity`, `/bots/[botId]` | order lifecycle filtering and per-bot order history; unlinked Alpaca snapshots remain explicitly external |
 
 API schemas use Zod. Add endpoint-specific tests for authorization and invalid input when extending them.
@@ -119,10 +135,11 @@ Bot creation performs the same pure capital validation in the client for early f
 | `APP_ENCRYPTION_KEY` | yes | Base64 32-byte AES-256-GCM master key |
 | `SESSION_SECRET` | yes | Session signing/entropy secret |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | first boot | Initial Admin only |
-| `ALPACA_PAPER_BASE_URL`, `ALPACA_API_KEY`, `ALPACA_API_SECRET` | for broker sync | Alpaca Paper credentials only |
+| `ALPACA_PAPER_BASE_URL`, `ALPACA_API_KEY`, `ALPACA_API_SECRET` | for global broker sync | One server-only Alpaca Paper credential pair; never requested per virtual wallet |
 | `ALPACA_DATA_FEED` | optional | Current default is `iex` |
 | `AI_ENABLED` | optional | Reserved; no AI adapter is wired yet |
 | `SMTP_*` | optional | SMTP connection readiness for future alert delivery; no sender is wired yet |
+| `METRICS_TOKEN` | optional | At least 32 characters when set; bearer protection for Prometheus scraping when no Admin session is used |
 
 ## Testing and change protocol
 
@@ -134,6 +151,14 @@ Suggested test ownership:
 - HTTP authorization/input: route-level or integration tests
 - Prisma transactions/migrations/leases: isolated MySQL integration tests
 - Broker/AI: sanitized contract fixtures, never external calls in automated tests
+
+`src/modules/security/security.mysql.integration.test.ts` is skipped unless `BRAIKER_TEST_DATABASE_URL` points at an isolated disposable MySQL database. It exercises competing reservations, competing reconciliation, realized P&L windows, and Kill Switch rejection with a mock broker; it must never use the development database or external credentials.
+
+### Current market cycle
+
+`AlpacaMarketDataAdapter` reads Alpaca Market Data REST with the configured Paper credentials and feed. Each cycle backfills/persists completed one-minute bars, obtains the latest quote, then evaluates the active bot's allowed symbol with shared `SPY` and `QQQ` regime context. `MarketEvaluation` prevents duplicate work for a candle. `trend-v1` is deterministic and persists the inputs and signal before invoking risk.
+
+The cycle uses REST polling today, not a browser connection and not a WebSocket. A future WebSocket manager must feed the same persistence/idempotency boundary, retain REST backfill for gaps, and never bypass the risk/execution path. Global reconciliation is executed once per cycle; broker orders with a BrAIker `client_order_id` are attributed to the originating virtual wallet through the internal order → proposal → bot trace. Broker-only orders remain associated with the default global wallet.
 
 Required completion command sequence:
 

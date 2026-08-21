@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { ALLOWED_TRADING_SYMBOLS, getBotTemplate } from "@/modules/bots/bot-templates";
+import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
 import { requireWalletRole } from "@/modules/auth/session";
 import { applyBotRiskLimits } from "@/modules/bots/bot-customization";
 import { canDeleteBot } from "@/modules/bots/bot-lifecycle";
+import { getConfiguredBotTemplate } from "@/modules/bots/profile-defaults";
 
 const money = z.string().regex(/^\d+(\.\d{1,12})?$/);
 const updateSchema = z.object({ name: z.string().trim().min(2).max(120).optional(), templateId: z.enum(["GUARDIAN", "NAVIGATOR", "EXPLORER"]).optional(), symbols: z.array(z.enum(ALLOWED_TRADING_SYMBOLS)).min(1).max(ALLOWED_TRADING_SYMBOLS.length).optional(), customInstructions: z.string().trim().max(1200).optional(), riskLimits: z.object({ maxPositionSize: money.optional(), maxDailyLoss: money.optional(), maxTradesPerDay: z.number().int().min(1).optional() }).optional() });
@@ -24,13 +25,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ botId
     const { bot, user } = await editableBot(botId);
     const body = updateSchema.safeParse(await request.json());
     if (!body.success || (!body.data.name && !body.data.templateId && !body.data.symbols && body.data.customInstructions === undefined && !body.data.riskLimits)) return NextResponse.json({ error: "Invalid bot update" }, { status: 400 });
-    const template = body.data.templateId ? getBotTemplate(body.data.templateId) : null;
-    const profile = template?.riskPolicy ?? bot.riskPolicy as typeof template extends null ? never : ReturnType<typeof getBotTemplate>["riskPolicy"];
+    const template = body.data.templateId ? await getConfiguredBotTemplate(body.data.templateId) : null;
+    const profile = template?.riskPolicy ?? (await getConfiguredBotTemplate(bot.templateId as "GUARDIAN" | "NAVIGATOR" | "EXPLORER")).riskPolicy;
     const riskPolicy = applyBotRiskLimits(profile, body.data.riskLimits);
     const priorStrategy = bot.strategyProfile as { customInstructions?: string };
     const updated = await prisma.$transaction(async (tx) => {
       if (body.data.symbols) { await tx.watchlist.deleteMany({ where: { botId } }); await tx.watchlist.createMany({ data: body.data.symbols.map((symbol) => ({ botId, symbol })) }); }
-      return tx.botInstance.update({ where: { id: bot.id }, data: { name: body.data.name, riskPolicy, ...(template ? { templateId: template.id, avatarSeed: template.avatar } : {}), strategyProfile: { strategyId: "hold", version: 1, templateId: template?.id ?? bot.templateId, customInstructions: body.data.customInstructions ?? priorStrategy.customInstructions ?? "" } } });
+      return tx.botInstance.update({ where: { id: bot.id }, data: { name: body.data.name, riskPolicy, ...(template ? { templateId: template.id, avatarSeed: template.avatar } : {}), strategyProfile: { ...priorStrategy, ...(template?.strategyProfile ?? {}), strategyId: "trend-v1", version: 1, templateId: template?.id ?? bot.templateId, customInstructions: body.data.customInstructions ?? priorStrategy.customInstructions ?? "" } } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await prisma.auditLog.create({ data: { userId: user.id, walletId: bot.walletId, action: "BOT_UPDATED", target: botId } });
     return NextResponse.json({ id: updated.id, name: updated.name, templateId: updated.templateId, avatarSeed: updated.avatarSeed, riskPolicy: updated.riskPolicy });

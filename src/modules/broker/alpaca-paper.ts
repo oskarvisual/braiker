@@ -1,7 +1,20 @@
 import { env } from "@/lib/env";
-import type { ApprovedOrder, BrokerAccount, BrokerAdapter, BrokerOrder, BrokerPortfolioPoint, BrokerPosition } from "@/modules/domain/contracts";
+import type { ApprovedOrder, BrokerAccount, BrokerAdapter, BrokerClock, BrokerOrder, BrokerPortfolioPoint, BrokerPosition } from "@/modules/domain/contracts";
 
 type Credentials = { apiKey: string; apiSecret: string };
+type AlpacaOrderPayload = {
+  id: string;
+  client_order_id: string;
+  status: string;
+  symbol?: string;
+  side?: string;
+  type?: string;
+  qty?: string;
+  filled_qty?: string;
+  filled_avg_price?: string | null;
+  submitted_at?: string;
+  filled_at?: string | null;
+};
 
 export class AlpacaPaperBrokerAdapter implements BrokerAdapter {
   readonly environment = "paper" as const;
@@ -35,7 +48,7 @@ export class AlpacaPaperBrokerAdapter implements BrokerAdapter {
   }
 
   async getOrders(): Promise<BrokerOrder[]> {
-    const orders = await this.request<Array<{ id: string; client_order_id: string; status: string }>>("/v2/orders?status=all&direction=desc&limit=20");
+    const orders = await this.request<AlpacaOrderPayload[]>("/v2/orders?status=all&direction=desc&limit=100");
     return orders.map((order) => ({ id: order.id, clientOrderId: order.client_order_id, status: order.status, raw: order }));
   }
 
@@ -47,9 +60,14 @@ export class AlpacaPaperBrokerAdapter implements BrokerAdapter {
     });
   }
 
+  async getClock(): Promise<BrokerClock> {
+    const clock = await this.request<{ is_open: boolean; timestamp: string; next_open: string; next_close: string }>("/v2/clock");
+    return { isOpen: clock.is_open, timestamp: new Date(clock.timestamp), nextOpen: new Date(clock.next_open), nextClose: new Date(clock.next_close) };
+  }
+
   async getOrderByClientOrderId(clientOrderId: string): Promise<BrokerOrder | null> {
     try {
-      const order = await this.request<{ id: string; client_order_id: string; status: string }>(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}`);
+      const order = await this.request<AlpacaOrderPayload>(`/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}`);
       return { id: order.id, clientOrderId: order.client_order_id, status: order.status, raw: order };
     } catch (error) {
       if (error instanceof Error && error.message === "NOT_FOUND") return null;
@@ -59,7 +77,7 @@ export class AlpacaPaperBrokerAdapter implements BrokerAdapter {
 
   async placeOrder(order: ApprovedOrder): Promise<BrokerOrder> {
     const payload = { symbol: order.symbol, qty: order.quantity, side: order.action.toLowerCase(), type: order.orderType.toLowerCase(), time_in_force: "day", client_order_id: order.clientOrderId, ...(order.orderType === "LIMIT" ? { limit_price: order.limitPrice } : {}) };
-    const created = await this.request<{ id: string; client_order_id: string; status: string }>("/v2/orders", { method: "POST", body: JSON.stringify(payload) });
+    const created = await this.request<AlpacaOrderPayload>("/v2/orders", { method: "POST", body: JSON.stringify(payload) });
     return { id: created.id, clientOrderId: created.client_order_id, status: created.status, raw: created };
   }
 

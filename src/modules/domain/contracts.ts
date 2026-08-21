@@ -10,6 +10,7 @@ export type BrokerAccount = { buyingPower: string; cash: string; equity: string;
 export type BrokerPosition = { symbol: string; quantity: string; marketValue: string; averageEntryPrice: string };
 export type BrokerOrder = { id: string; clientOrderId: string; status: string; raw: Record<string, unknown> };
 export type BrokerPortfolioPoint = { capturedAt: Date; equity: string };
+export type BrokerClock = { isOpen: boolean; timestamp: Date; nextOpen: Date; nextClose: Date };
 export type ApprovedOrder = TradeProposalInput & { clientOrderId: string };
 
 export interface BrokerAdapter {
@@ -19,6 +20,7 @@ export interface BrokerAdapter {
   getOrders(): Promise<BrokerOrder[]>;
   getOrderByClientOrderId(clientOrderId: string): Promise<BrokerOrder | null>;
   getPortfolioHistory(): Promise<BrokerPortfolioPoint[]>;
+  getClock(): Promise<BrokerClock>;
   placeOrder(order: ApprovedOrder): Promise<BrokerOrder>;
   cancelOrder(orderId: string): Promise<void>;
   healthCheck(): Promise<{ healthy: boolean; detail?: string }>;

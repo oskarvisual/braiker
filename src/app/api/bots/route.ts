@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { requireWalletRole } from "@/modules/auth/session";
 import { Prisma } from "@prisma/client";
 import { DEFAULT_RISK_POLICY } from "@/modules/risk/types";
-import { ALLOWED_TRADING_SYMBOLS, getBotTemplate } from "@/modules/bots/bot-templates";
+import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
 import { validateBudgetAllocation } from "@/modules/capital/capital-policy";
 import { applyBotRiskLimits } from "@/modules/bots/bot-customization";
+import { getConfiguredBotTemplate } from "@/modules/bots/profile-defaults";
 
 const money = z.string().regex(/^\d+(\.\d{1,12})?$/);
 const createSchema = z.object({
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
       const source = await prisma.botInstance.findUnique({ where: { id: body.data.sourceBotId }, select: { id: true } });
       if (!source) return NextResponse.json({ error: "CLONE_SOURCE_NOT_FOUND" }, { status: 400 });
     }
-    const template = getBotTemplate(body.data.templateId);
+    const template = await getConfiguredBotTemplate(body.data.templateId);
     const riskPolicy = applyBotRiskLimits(template.riskPolicy, body.data.riskLimits);
     const budget = new Prisma.Decimal(body.data.budget);
     const bot = await prisma.$transaction(async (tx) => {
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
         initialCapital: budget,
         currentCapital: budget,
         riskPolicy: riskPolicy ?? DEFAULT_RISK_POLICY,
-        strategyProfile: { strategyId: "hold", version: 1, templateId: template.id, customInstructions: body.data.customInstructions ?? "" },
+        strategyProfile: { strategyId: "trend-v1", version: 1, templateId: template.id, customInstructions: body.data.customInstructions ?? "", ...template.strategyProfile },
         watchlist: { create: body.data.symbols.map((symbol) => ({ symbol })) },
         memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols: body.data.symbols, customInstructions: body.data.customInstructions ?? "", riskLimits: body.data.riskLimits ?? null } } }
       } });

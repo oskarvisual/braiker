@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "paper:soak:check": "node scripts/paper-soak-check.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.16.2",
