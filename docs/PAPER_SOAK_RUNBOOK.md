@@ -25,9 +25,10 @@ This runbook is for the Personal Paper deployment only. It is never a checklist 
 2. In Settings, set a deliberately small **Global Paper capital** envelope. It is an internal BrAIker limit and cannot exceed Alpaca's reported cash.
 3. Create virtual wallets from that unassigned pool. Confirm that wallet totals plus unassigned capital equal the global envelope.
 4. Create one bot with a small budget, a small allowed universe, and conservative limits. Turning it on permits analysis only when the market is open; it does not guarantee an order.
-5. Run a dashboard sync. Confirm Alpaca cash/equity/positions load and the bot's virtual capital stays separate from the global account view.
-6. For every submitted order, open its English Decision report from History or bot detail and verify the chain: market evaluation → strategy signal → optional AI advisory → proposal → risk decision → execution job → broker order → fill/capital event. Confirm the broker snapshot is attributed to the bot's virtual wallet.
-7. If AI is enabled, confirm it is configured with a small per-bot daily cap, inspect one completed or failed advisory record in the Decision report, and verify that provider failure did not grant an approval or bypass risk.
+5. Open that bot's history modal and use **Analysis activity** to confirm a completed scan appears with the evaluated symbols and a plain-English result. When the market is closed, confirm the latest activity says it is waiting rather than reporting an error.
+6. Run a dashboard sync. Confirm Alpaca cash/equity/positions load and the bot's virtual capital stays separate from the global account view.
+7. For every submitted order, open its English Decision report from History or bot detail and verify the chain: market evaluation → strategy signal → optional AI advisory → proposal → risk decision → execution job → broker order → fill/capital event. Confirm the broker snapshot is attributed to the bot's virtual wallet.
+8. If AI is enabled, confirm it is configured with a small per-bot daily cap, inspect one completed or failed advisory record in the Decision report, and verify that provider failure did not grant an approval or bypass risk.
 
 ## Daily checks during the soak
 

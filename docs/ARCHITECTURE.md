@@ -112,7 +112,7 @@ The static Guardian/Navigator/Explorer templates retain their strategy weights a
 | --- | --- | --- |
 | Auth | `/login`, `/api/auth/*`, `/account/password` | session and password lifecycle |
 | Dashboard | `/`, `/api/dashboard/overview`, `/api/dashboard/sync` | sync is Admin-only |
-| Bots | `/setup`, `/api/bots`, `/api/bots/[botId]`, `/api/bots/[botId]/control`, `/api/bots/[botId]/capital`, `/api/bots/[botId]/history` | UI control body is `TURN_ON` or `TURN_OFF` only; Admin capital adjustments are serialized and history is authorized per wallet |
+| Bots | `/setup`, `/api/bots`, `/api/bots/[botId]`, `/api/bots/[botId]/control`, `/api/bots/[botId]/capital`, `/api/bots/[botId]/history`, `/api/bots/[botId]/analysis` | UI control body is `TURN_ON` or `TURN_OFF` only; Admin capital adjustments are serialized and Operations/Analysis history is authorized per wallet |
 | Users | `/admin/users`, `/api/admin/users/*` | Admin only |
 | Settings | `/settings`, `/api/wallets`, `/api/wallets/[walletId]/capital`, `/api/settings/paper-capital`, `/api/settings/synchronization`, `/api/settings/notifications` | global Paper capital, serialized virtual-wallet budget changes, schedule, and persisted alert preferences |
 | Diagnostics | `/api/health`, `/api/ready`, `/api/metrics`, `/status`, `/api/status` | liveness, readiness, Prometheus, authenticated operational view, and public sanitized uptime JSON; metrics needs an Admin session or `Authorization: Bearer $METRICS_TOKEN` |
@@ -162,6 +162,8 @@ Suggested test ownership:
 ### Current market cycle
 
 `AlpacaMarketDataAdapter` reads Alpaca Market Data REST with the configured Paper credentials and feed. Each cycle backfills/persists completed one-minute bars, obtains the latest quote, then evaluates the active bot's allowed symbol with shared `SPY` and `QQQ` regime context. `MarketEvaluation` prevents duplicate work for a candle. `trend-v1` is deterministic and persists the inputs and signal before any AI review or risk evaluation.
+
+After each open-market pass, the worker writes one `BotScanRun` per active bot. It contains only an operator-safe summary and per-symbol outcome (`HOLD`, `APPROVED`, risk/AI rejection, insufficient bot capital, duplicate candle, or missing market data); raw exception strings, credentials, and provider payloads are never stored there. A market-closed or empty-watchlist state is recorded at most once per bot per hour. The worker runs a leased daily retention task that deletes `BotScanRun` rows older than 30 days. `GET /api/bots/[botId]/analysis` is authenticated and enforces the same wallet-membership rule as order history.
 
 When `AI_ENABLED=true`, an eligible deterministic `BUY`/`SELL` candidate can call `OpenAiAdvisor` through the Responses API with a structured, redacted market/signal payload and a strict timeout. The review is capped per bot per UTC day, and records `AiDecision` metadata including sanitized request/response, token counts, Decimal cost estimate, or sanitized provider failure. `REJECT` stops that candidate before risk; `PROCEED` and `CAUTION` have no approval authority, and a timeout/malformed/failed review falls back to the deterministic risk path. Neither the browser nor tests call the provider, and no provider result can alter capital, limits, the Kill Switch, or idempotent order submission.
 

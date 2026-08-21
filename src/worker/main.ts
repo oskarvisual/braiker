@@ -13,6 +13,7 @@ import { isIntervalCronDue } from "@/modules/scheduler/schedule-policy";
 import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
 import { globalPaperCredentials } from "@/modules/broker/global-paper";
 import { AlpacaMarketStreamManager } from "@/modules/market/alpaca-market-stream";
+import { botScanRetentionCutoff } from "@/modules/market/bot-scan-activity";
 
 async function reconcilePortfolio() {
   await syncGlobalPaperAccount();
@@ -25,6 +26,11 @@ async function runReconciliationIfDue() {
   await runTask("portfolio-reconciliation", reconcilePortfolio);
 }
 
+async function retainBotScanActivity() {
+  const result = await prisma.botScanRun.deleteMany({ where: { startedAt: { lt: botScanRetentionCutoff() } } });
+  logger.info({ deleted: result.count }, "Expired retained bot analysis activity");
+}
+
 async function main() {
   const config = env();
   if (config.TRADING_MODE !== "paper") throw new Error("Only paper trading is supported");
@@ -34,7 +40,8 @@ async function main() {
   await Promise.all([
     ensureTask("lease-recovery", "*/1 * * * *"),
     ensureTask("portfolio-reconciliation", "*/5 * * * *"),
-    ensureTask("market-cycle", "*/1 * * * *")
+    ensureTask("market-cycle", "*/1 * * * *"),
+    ensureTask("bot-scan-retention", "15 0 * * *")
   ]);
   const marketStream = new AlpacaMarketStreamManager({
     credentials: globalPaperCredentials(),
@@ -51,6 +58,7 @@ async function main() {
   };
   cron.schedule("*/1 * * * *", () => void runTask("lease-recovery", async () => { await expireLeases(); await heartbeat(); }), { timezone: "UTC" });
   cron.schedule("*/1 * * * *", () => void runReconciliationIfDue(), { timezone: "UTC" });
+  cron.schedule("15 0 * * *", () => void runTask("bot-scan-retention", retainBotScanActivity), { timezone: "UTC" });
   cron.schedule("5 * * * * *", () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
   cron.schedule("*/30 * * * * *", () => void processOneExecutionJob(), { timezone: "UTC" });
   await heartbeat();

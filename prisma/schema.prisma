@@ -173,6 +173,7 @@ model BotInstance {
   watchlist      Watchlist[]
   botPositions   BotPosition[]
   portfolioSnapshots PortfolioSnapshot[]
+  scanRuns       BotScanRun[]
   @@index([walletId, status])
   @@index([cloneSourceId])
 }
@@ -262,6 +263,20 @@ model MarketEvaluation {
   createdAt       DateTime @default(now()) @db.DateTime(3)
   completedAt     DateTime? @db.DateTime(3)
   @@index([botId, symbol, candleTimestamp])
+}
+
+model BotScanRun {
+  id          String   @id @default(uuid()) @db.Char(36)
+  botId       String   @db.Char(36)
+  status      String   @db.VarChar(16)
+  reason      String   @db.VarChar(32)
+  message     String   @db.VarChar(500)
+  outcomes    Json
+  startedAt   DateTime @default(now()) @db.DateTime(3)
+  completedAt DateTime? @db.DateTime(3)
+  bot         BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, startedAt])
+  @@index([startedAt])
 }
 
 model MarketSnapshot {

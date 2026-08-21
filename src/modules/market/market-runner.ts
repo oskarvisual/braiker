@@ -12,6 +12,7 @@ import type { MarketBar } from "@/modules/domain/contracts";
 import { AlpacaMarketDataAdapter, type PersistableMarketBar } from "@/modules/market/alpaca-market-data";
 import { buildIndicatorSet, classifyMarketRegime, marketTrend } from "@/modules/market/market-context";
 import { marketEvaluationKey, shouldAcceptBar } from "@/modules/market/market-data-policy";
+import { buildBotScanActivity, shouldRecordSkippedActivity, type BotScanOutcomeInput } from "@/modules/market/bot-scan-activity";
 import type { RiskPolicy } from "@/modules/risk/types";
 import { sizePosition } from "@/modules/strategy/position-sizing";
 import { evaluateTrendStrategy, type StrategyProfile } from "@/modules/strategy/trend-strategy";
@@ -61,6 +62,26 @@ async function backfill(adapter: AlpacaMarketDataAdapter, symbol: string, feed: 
   const start = latest ? new Date(latest.timestamp.getTime() + 60_000) : new Date(Date.now() - 7 * 24 * 60 * 60_000);
   const bars = await adapter.getMinuteBars(symbol, start);
   return persistBars(bars);
+}
+
+async function recordBotScan(botId: string, activity: ReturnType<typeof buildBotScanActivity>, startedAt = new Date()) {
+  await prisma.botScanRun.create({
+    data: {
+      botId,
+      status: activity.status,
+      reason: activity.reason,
+      message: activity.message,
+      outcomes: activity.outcomes as Prisma.InputJsonValue,
+      startedAt,
+      completedAt: new Date()
+    }
+  });
+}
+
+async function recordSkippedBotScan(botId: string, state: "MARKET_CLOSED" | "NO_SYMBOLS", now = new Date()) {
+  const latest = await prisma.botScanRun.findFirst({ where: { botId }, orderBy: { startedAt: "desc" }, select: { reason: true, startedAt: true } });
+  if (!shouldRecordSkippedActivity({ lastReason: latest?.reason, lastStartedAt: latest?.startedAt, reason: state, now })) return;
+  await recordBotScan(botId, buildBotScanActivity({ state, outcomes: [] }), now);
 }
 
 async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle: MarketBar; quote: { bid: string; ask: string; timestamp: Date; feed: string }; marketBars: Map<string, MarketBar[]>; marketOpen: boolean; account: { cash: string; equity: string } }) {
@@ -178,7 +199,10 @@ export async function processMarketCycle() {
   let storedBars = 0;
   let evaluations = 0;
   const clock = await globalPaperBroker().getClock();
-  if (!clock.isOpen) return { activeBots: bots.length, storedBars, evaluations };
+  if (!clock.isOpen) {
+    await Promise.all(bots.map((bot) => recordSkippedBotScan(bot.id, "MARKET_CLOSED").catch((error) => logger.warn({ err: error, botId: bot.id }, "Unable to record market-closed bot activity"))));
+    return { activeBots: bots.length, storedBars, evaluations };
+  }
   const sync = await syncGlobalPaperAccount();
   const market = new AlpacaMarketDataAdapter(globalPaperCredentials());
   const symbols = new Set(["SPY", "QQQ", ...bots.flatMap((bot: ActiveBot) => bot.watchlist.map((item) => item.symbol))]);
@@ -189,12 +213,27 @@ export async function processMarketCycle() {
   const quotes = new Map<string, Awaited<ReturnType<typeof market.getLatestQuote>>>();
   for (const symbol of symbols) quotes.set(symbol, await market.getLatestQuote(symbol));
   for (const bot of bots) {
-    for (const entry of bot.watchlist) {
-      const candle = bars.get(entry.symbol)?.at(-1);
-      const quote = quotes.get(entry.symbol);
-      if (!candle || !quote) continue;
-      const result = await evaluateBotForBar({ bot, symbol: entry.symbol, candle, quote, marketBars: bars, marketOpen: clock.isOpen, account: { cash: sync.cash, equity: sync.equity } });
-      if (result !== "duplicate") evaluations += 1;
+    if (!bot.watchlist.length) {
+      await recordSkippedBotScan(bot.id, "NO_SYMBOLS").catch((error) => logger.warn({ err: error, botId: bot.id }, "Unable to record no-symbol bot activity"));
+      continue;
+    }
+    const outcomes: BotScanOutcomeInput[] = [];
+    try {
+      for (const entry of bot.watchlist) {
+        const candle = bars.get(entry.symbol)?.at(-1);
+        const quote = quotes.get(entry.symbol);
+        if (!candle || !quote) {
+          outcomes.push({ symbol: entry.symbol, outcome: "missing-data" });
+          continue;
+        }
+        const result = await evaluateBotForBar({ bot, symbol: entry.symbol, candle, quote, marketBars: bars, marketOpen: clock.isOpen, account: { cash: sync.cash, equity: sync.equity } });
+        outcomes.push({ symbol: entry.symbol, outcome: result });
+        if (result !== "duplicate") evaluations += 1;
+      }
+      await recordBotScan(bot.id, buildBotScanActivity({ state: "COMPLETED", outcomes }));
+    } catch (error) {
+      await recordBotScan(bot.id, buildBotScanActivity({ state: "ERROR", outcomes: [] })).catch((recordingError) => logger.warn({ err: recordingError, botId: bot.id }, "Unable to record failed bot activity"));
+      logger.error({ err: error, botId: bot.id }, "Bot market analysis cycle failed");
     }
   }
   logger.info({ activeBots: bots.length, storedBars, evaluations }, "Shared market cycle completed");

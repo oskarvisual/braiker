@@ -24,12 +24,12 @@ Implemented today:
 - Global, dismissible action feedback through toasts, so an error from a modal is never rendered elsewhere on the page.
 - A fixed operational sidebar and a compact top account menu for Settings, user administration, password management, and sign-out.
 - Dashboard with Alpaca equity/cash, a seven-day account chart, positions, broker orders, and allocated bot capital.
-- Order-first History with lifecycle and bot filters, plus a read-only per-bot detail/history page and an English decision report for every submitted BrAIker order.
+- Order-first History with lifecycle and bot filters, plus a per-bot modal with separate **Operations** and **Analysis activity** tabs. Analysis records explain completed, skipped, and failed cycles in plain English even when no order is placed; retained scan activity is pruned after 30 days.
 - Three bot profiles: Guardian, Navigator, Explorer; Admin-editable defaults for position, daily-loss, and trade-count caps, plus per-bot name, avatar, budget, symbols, instruction, and bounded risk limits.
 - Atomic budget allocation and adjustments, per-bot capital events, cloning with source lineage, `DEAD`-state guards, concurrent ON/OFF control for independently funded bots, and audit logs.
 - Persistent scheduler leases, health/readiness endpoints, Prometheus metrics, and worker heartbeats.
 - Admin-only **System status** page plus public `GET /api/status` JSON: live MySQL, worker-heartbeat and Alpaca Paper checks; bot counts; and accurate configured/disabled states for AI, SMTP and webhooks without exposing secrets. The public endpoint is for uptime automation and returns only the already-sanitized aggregate state.
-- A shared, once-per-minute market cycle for ON bots: Alpaca IEX minute bars and quotes are persisted, closed candles are deduplicated, and each bot is evaluated once per candle.
+- A shared, once-per-minute market cycle for ON bots: Alpaca IEX minute bars and quotes are persisted, closed candles are deduplicated, each bot is evaluated once per candle, and durable per-bot activity verifies what the worker did before a trade exists.
 - Deterministic `trend-v1` strategy with EMA, RSI, ATR, momentum, relative-volume, and SPY/QQQ regime context. It produces auditable `BUY`, `SELL`, or `HOLD` signals. Optional OpenAI advisory review runs only for candidate `BUY`/`SELL` signals; it may veto a candidate but can never approve risk, raise limits, size an order, or submit one.
 - English decision reports connect market snapshot → deterministic signal → optional AI advisory → risk decision → execution → fills. They are linked from History and each bot's order history.
 - Paper-only proposal → risk decision → idempotent Alpaca order flow. Confirmed terminal broker outcomes reconcile fills, per-bot virtual cash, reservations, bot positions, capital events, and permanent death safeguards.
@@ -38,7 +38,6 @@ Implemented today:
 Not implemented yet:
 
 - RAG, bot chat, or autonomous learning. The optional OpenAI trade-advisory adapter is implemented, but it is deliberately non-privileged.
-- A single persistent Alpaca market-data WebSocket stream for the bounded equity universe. It authenticates with the server-only Paper credentials, persists immutable bars/quotes, writes a durable stream heartbeat, and reconnects with bounded exponential backoff. The shared REST cycle remains the conservative reconciliation and backfill path; it is still the idempotent decision boundary.
 - Webhook/email alert delivery. Preferences and destinations can be configured, but delivery waits for durable event dispatch and SMTP configuration.
 - Live trading or any broker besides Alpaca Paper.
 
