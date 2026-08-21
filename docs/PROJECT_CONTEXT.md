@@ -65,9 +65,12 @@ Do not bring back Simulation, a Paper button/tag, a separate enable button, or a
 - `/login` — sign in.
 - `/` — dashboard: Alpaca account figures, chart, positions, broker orders, and bot summary.
 - `/setup` — Admin bot listing and add/edit/clone modal. It shows current bot capital, risk limits, allowed symbols, and one ON/OFF switch. Active bots can move capital to/from their wallet; dead bots expose history and cloning only. Clicking a bot name or eye icon opens its full-width order-history modal.
-- `/activity` — order-first History. It filters by lifecycle (`Open`, `In progress`, `Closed`, `Rejected`), bot, and symbol/status text. BrAIker orders link to `/bots/[botId]`; Alpaca orders without an internal link are explicitly shown as external/no bot linked.
-- `/bots/[botId]` — read-only bot detail: configured universe, capital/status, and that bot's recorded BrAIker orders. A dead bot remains history-only.
+- `/activity` — order-first History. It filters by lifecycle (`Open`, `In progress`, `Closed`, `Rejected`), bot, and symbol/status text. BrAIker orders link to `/bots/[botId]` and their English decision report at `/decisions/[proposalId]`; Alpaca orders without an internal link are explicitly shown as external/no bot linked.
+- `/bots/[botId]` — read-only bot detail: configured universe, capital/status, and that bot's recorded BrAIker orders. Each internal order links to its decision report. A dead bot remains history-only.
+- `/decisions/[proposalId]` — authorized, read-only English causal report: market snapshot and indicators → deterministic signal → optional AI advisory → persisted risk checks → execution lifecycle → fills. It never exposes credentials or prompt secrets.
 - `/settings` — Admin global Paper-capital, virtual wallet creation and per-wallet budget management, sync interval, alert-preference, and profile configuration. Profile defaults affect new bots; bot-specific risk limits are edited from the existing bot's three-step editor. It never asks for Alpaca credentials because Personal Paper mode reads the single pair from `.env`. Webhooks and email each choose their destination and alert events independently. Webhook destinations are encrypted and never shown again. It is reached through the top account menu, not the sidebar.
+- `/status` — Admin-only operational status page, reached through the top account menu. It performs live checks for MySQL, the worker heartbeat and Alpaca Paper, reports ON/OFF/DEAD bot counts, and accurately labels OpenAI, SMTP and webhooks as disabled, configured-but-not-delivered, or unavailable. It never displays credentials, webhook URLs, recipients, or account identifiers.
+- `GET /api/status` — public, unauthenticated JSON equivalent for uptime checks and automations. It returns an overall `healthy`/`warning`/`unavailable` state, check time, aggregate bot counts, and the same sanitized service states as `/status`; it must never add credentials, webhook destinations, recipients, account IDs, database URLs, or raw exception details.
 - `/admin/users` — Admin user CRUD, reached through the top account menu.
 - `/account/password` — password change.
 
@@ -79,10 +82,12 @@ The bot modal is a three-step wizard. Navigation is non-persistent: it must neve
 
 ## Implemented market and execution foundation
 
-- The worker runs a leased `market-cycle` once per minute. It checks the one Alpaca Paper market clock, reconciles the global account once, loads all active bots, and fetches shared Alpaca IEX one-minute bars plus latest quotes for the union of permitted symbols and `SPY`/`QQQ`.
+- The worker owns one persistent Alpaca IEX WebSocket for the fixed ten-symbol universe. It persists immutable market events plus completed one-minute bars, writes a durable authenticated stream heartbeat, and reconnects with bounded exponential backoff. The browser never connects to Alpaca.
+- The worker runs a leased `market-cycle` once per minute. It checks the one Alpaca Paper market clock, reconciles the global account once, loads all active bots, and uses REST backfill plus latest quotes for the union of permitted symbols and `SPY`/`QQQ`. REST is the gap-recovery path; the shared evaluation remains idempotent.
 - Only completed candles are persisted/evaluated. `MarketEvaluation.evaluationKey` makes an evaluation idempotent per bot, symbol, timeframe, and candle timestamp.
 - `trend-v1` is deterministic: EMA trend, RSI, ATR, momentum, relative volume, and SPY/QQQ regime create `BUY`, `SELL`, or `HOLD`. Each pass persists a market snapshot and strategy signal.
-- A candidate goes through the existing risk engine, then an idempotent execution job. `client_order_id` is recovered from Alpaca before a retry submits an order.
+- An eligible `BUY`/`SELL` candidate may receive an optional OpenAI advisory review. The adapter receives a redacted market/signal context, uses structured output, is rate-limited per bot, and records model, request, response, token use, cost estimate, or sanitized failure. It may only veto (`REJECT`) a candidate. `PROCEED`, `CAUTION`, timeout, malformed output, or provider failure never approve risk or submit an order; the deterministic path continues to the existing risk engine.
+- A candidate not vetoed by AI goes through the existing risk engine, then an idempotent execution job. `client_order_id` is recovered from Alpaca before a retry submits an order.
 - Reconciliation records broker snapshots and terminal fills. Virtual cash, reservations, and `BotPosition` are attributed to exactly one bot; a zero-cash bot with no remaining position becomes permanently `DEAD`, is switched OFF, and retains its trace.
 
 The design intent is survival, not maximum activity: no strategy, prompt, or profile can bypass risk, capital isolation, the kill switch, or permanent death semantics.
@@ -91,24 +96,22 @@ The design intent is survival, not maximum activity: no strategy, prompt, or pro
 
 Do not claim these exist or wire placeholders that imply they do:
 
-1. Persistent Alpaca WebSocket streaming, explicit reconnect/backfill telemetry, and a backtest runner. Current bar/quote collection is REST-based and deliberately bounded to the shared minute cycle.
-2. AI analysis, OpenAI adapter, RAG, bot conversation, memory retrieval, cost tracking, or bot learning loop.
-3. Decision reports beyond the current order history: the decision data is persisted but the UI does not yet render the full snapshot → signal → risk → order → fill causal view.
-4. Alert delivery. Notification preferences and destinations are persisted now, but no worker dispatches webhook/email messages until durable event semantics and delivery/retry handling are implemented. SMTP configuration remains environment-only.
+1. A reproducible backtest runner. Persistent Alpaca WebSocket streaming is implemented as one worker-owned connection with durable heartbeats, bounded reconnects, and REST backfill; the shared minute cycle remains the idempotent decision path.
+2. RAG, bot conversation, memory retrieval, or a bot learning loop. The implemented OpenAI advisory is optional, rate-limited, auditable, and cannot gain execution authority.
+3. Alert delivery. Notification preferences and destinations are persisted now, but no worker dispatches webhook/email messages until durable event semantics and delivery/retry handling are implemented. SMTP configuration remains environment-only.
 
 ## Next product milestones
 
 Prioritize in this order unless the user explicitly reprioritizes:
 
-1. Add persistent market-stream reconnect/backfill behavior and reproducible backtests without weakening the existing REST cycle safeguards.
-2. Render decision traceability: market snapshot → indicators → deterministic signal → risk decision → execution lifecycle.
-3. Add notification delivery only after durable event semantics exist.
-4. Add richer per-bot decision reports and portfolio/P&L views.
-5. Add optional AI analysis behind validated, auditable, non-privileged adapters.
+1. Add reproducible backtests without weakening the existing stream, REST-backfill, and evaluation safeguards.
+2. Add notification delivery only after durable event semantics exist.
+3. Add richer per-bot decision reports and portfolio/P&L views.
+4. Extend the optional AI advisory only behind validated, auditable, non-privileged adapters.
 
 ## Paper soak entry criteria
 
-Before an unattended local soak, run `npm run test`, `npm run typecheck`, `npm run build`, `npm run prisma:generate`, `npx prisma validate`, and `npm run paper:soak:check`; also run the isolated MySQL security integration suite with `BRAIKER_TEST_DATABASE_URL` set to a disposable database. Make a manual dashboard sync and verify the worker heartbeat/`/api/ready`. Keep one worker process only. Use a small global Paper-capital envelope, confirm virtual wallet/bot allocation totals, and review broker/order attribution after every fill. Follow [`PAPER_SOAK_RUNBOOK.md`](PAPER_SOAK_RUNBOOK.md) for daily checks and stop conditions. Do not promote this deployment to live trading: live requires a separate deployment, database, secrets, and security review.
+Before an unattended local soak, run `npm run test`, `BRAIKER_TEST_DATABASE_URL=<isolated-disposable-url> npm run test:integration`, `npm run typecheck`, `npm run build`, `npm run prisma:generate`, `npx prisma validate`, and `npm run paper:soak:check`. Make a manual dashboard sync and verify the worker heartbeat/`/api/ready`. Keep one worker process only. Use a small global Paper-capital envelope, confirm virtual wallet/bot allocation totals, and review broker/order attribution after every fill. Follow [`PAPER_SOAK_RUNBOOK.md`](PAPER_SOAK_RUNBOOK.md) for daily checks and stop conditions. Do not promote this deployment to live trading: live requires a separate deployment, database, secrets, and security review.
 
 ## UI principles
 

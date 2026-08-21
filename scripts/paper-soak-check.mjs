@@ -8,11 +8,15 @@ async function check(path) {
 }
 
 try {
-  const [health, readiness] = await Promise.all([check("/api/health"), check("/api/ready")]);
+  const [health, readiness, status] = await Promise.all([check("/api/health"), check("/api/ready"), check("/api/status")]);
   if (health.mode !== "paper") throw new Error(`Expected paper mode, got ${health.mode ?? "unknown"}`);
   if (readiness.database !== "connected") throw new Error("MySQL is not ready");
+  const worker = status.services?.find((service) => service.id === "worker");
+  const stream = status.services?.find((service) => service.id === "market-stream");
+  if (worker?.state !== "healthy") throw new Error(`Worker is not healthy: ${worker?.detail ?? "unknown"}`);
+  if (stream?.state !== "healthy") throw new Error(`Alpaca market stream is not healthy: ${stream?.detail ?? "unknown"}`);
   console.log(`Paper soak preflight passed for ${baseUrl}: web is healthy, MySQL is connected, mode is paper.`);
-  console.log("Verify the single worker heartbeat and perform a manual dashboard sync before enabling bots.");
+  console.log("Worker and Alpaca market-stream heartbeats are current. Perform a manual dashboard sync before enabling bots.");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Paper soak preflight failed");
   process.exit(1);

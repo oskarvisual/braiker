@@ -4,6 +4,8 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { globalPaperBroker, globalPaperCredentials } from "@/modules/broker/global-paper";
 import { syncGlobalPaperAccount } from "@/modules/broker/paper-sync";
+import { reviewTradeCandidateWithAi } from "@/modules/ai/ai-review-service";
+import { sanitizedBotInstruction } from "@/modules/ai/ai-review-policy";
 import { getBotTemplate } from "@/modules/bots/bot-templates";
 import { recordProposedTrade } from "@/modules/decision/decision-service";
 import type { MarketBar } from "@/modules/domain/contracts";
@@ -112,12 +114,34 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
       await prisma.marketEvaluation.update({ where: { evaluationKey }, data: { status: "NO_CAPITAL", completedAt: new Date() } });
       return "no-capital";
     }
+    const aiIndicators: Record<string, number> = {};
+    for (const [name, value] of Object.entries({ ema9: indicators.ema9, ema21: indicators.ema21, rsi14: indicators.rsi14, atr14: indicators.atr14, momentum5: indicators.momentum5, relativeVolume: indicators.relativeVolume })) {
+      if (typeof value === "number") aiIndicators[name] = value;
+    }
+    const aiReview = await reviewTradeCandidateWithAi({
+      botId: input.bot.id,
+      candidate: {
+        symbol: input.symbol,
+        action: proposal.action,
+        confidence: signal.confidence,
+        strategyReason: signal.reason,
+        indicators: aiIndicators,
+        marketRegime: regime,
+        botInstruction: sanitizedBotInstruction(input.bot.strategyProfile)
+      }
+    });
+    if (aiReview.blocked) {
+      await prisma.marketEvaluation.update({ where: { evaluationKey }, data: { status: "AI_REJECTED", completedAt: new Date() } });
+      await prisma.systemEvent.create({ data: { severity: "WARN", source: "ai-advisor", message: "AI advisory rejected deterministic paper candidate", metadata: { botId: input.bot.id, symbol: input.symbol, signal: signal.action, aiDecisionId: aiReview.aiDecisionId } } });
+      return "ai-rejected";
+    }
     const pending = await prisma.tradeProposal.findMany({ where: { botId: input.bot.id, symbol: input.symbol, status: { in: ["RISK_APPROVED", "SUBMITTED"] } }, select: { symbol: true } });
     const tradesToday = await prisma.tradeProposal.count({ where: { botId: input.bot.id, action: { not: TradeAction.HOLD }, createdAt: { gte: new Date(new Date().setUTCHours(0, 0, 0, 0)) } } });
     const pnl = await realizedPnlWindows(prisma.fill, input.bot.id);
     const result = await recordProposedTrade({
       botId: input.bot.id,
       signalId: signalRecord.id,
+      aiDecisionId: aiReview.aiDecisionId,
       proposal,
       marketContext: context,
       policy,

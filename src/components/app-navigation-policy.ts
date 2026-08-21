@@ -13,6 +13,6 @@ export function sidebarNavigationItems(role: AppRole): NavigationItem[] {
 
 export function accountMenuItems(role: AppRole): NavigationItem[] {
   return role === "ADMIN"
-    ? [{ href: "/settings", label: "Settings" }, { href: "/admin/users", label: "Users" }]
+    ? [{ href: "/status", label: "System status" }, { href: "/settings", label: "Settings" }, { href: "/admin/users", label: "Users" }]
     : [];
 }

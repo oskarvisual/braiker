@@ -9,6 +9,7 @@ describe("application navigation policy", () => {
       { href: "/setup", label: "Bots" }
     ]);
     expect(accountMenuItems("ADMIN")).toEqual([
+      { href: "/status", label: "System status" },
       { href: "/settings", label: "Settings" },
       { href: "/admin/users", label: "Users" }
     ]);

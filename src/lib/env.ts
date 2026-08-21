@@ -9,6 +9,10 @@ const schema = z.object({
   BOOTSTRAP_ADMIN_EMAIL: z.string().email(),
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12),
   AI_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  OPENAI_API_KEY: z.string().trim().default(""),
+  OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.4-mini"),
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
+  AI_MAX_ANALYSES_PER_BOT_PER_DAY: z.coerce.number().int().min(1).max(100).default(10),
   ALPACA_PAPER_BASE_URL: z.literal("https://paper-api.alpaca.markets"),
   ALPACA_API_KEY: z.string().min(8),
   ALPACA_API_SECRET: z.string().min(8),
@@ -21,6 +25,8 @@ const schema = z.object({
   SMTP_FROM: z.string().default(""),
   METRICS_TOKEN: z.string().refine((value) => value === "" || value.length >= 32).default(""),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info")
+}).superRefine((value, context) => {
+  if (value.AI_ENABLED && value.OPENAI_API_KEY.length < 20) context.addIssue({ code: z.ZodIssueCode.custom, path: ["OPENAI_API_KEY"], message: "required when AI_ENABLED=true" });
 });
 
 export type Environment = z.infer<typeof schema>;

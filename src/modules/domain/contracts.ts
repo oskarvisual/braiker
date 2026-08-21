@@ -32,5 +32,5 @@ export interface MarketDataProvider {
 }
 
 export interface AIProvider {
-  analyze(input: Record<string, unknown>): Promise<{ action: TradeAction; confidence: number; reason: string }>;
+  analyze(input: { symbol: string; action: Exclude<TradeAction, "HOLD">; confidence: number; strategyReason: string; indicators: Record<string, number>; marketRegime: string }): Promise<{ recommendation: "PROCEED" | "CAUTION" | "REJECT"; rationale: string; risks: string[]; evidence: string[] }>;
 }

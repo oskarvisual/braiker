@@ -115,8 +115,12 @@ The static Guardian/Navigator/Explorer templates retain their strategy weights a
 | Bots | `/setup`, `/api/bots`, `/api/bots/[botId]`, `/api/bots/[botId]/control`, `/api/bots/[botId]/capital`, `/api/bots/[botId]/history` | UI control body is `TURN_ON` or `TURN_OFF` only; Admin capital adjustments are serialized and history is authorized per wallet |
 | Users | `/admin/users`, `/api/admin/users/*` | Admin only |
 | Settings | `/settings`, `/api/wallets`, `/api/wallets/[walletId]/capital`, `/api/settings/paper-capital`, `/api/settings/synchronization`, `/api/settings/notifications` | global Paper capital, serialized virtual-wallet budget changes, schedule, and persisted alert preferences |
-| Diagnostics | `/api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, Prometheus; metrics needs an Admin session or `Authorization: Bearer $METRICS_TOKEN` |
+| Diagnostics | `/api/health`, `/api/ready`, `/api/metrics`, `/status`, `/api/status` | liveness, readiness, Prometheus, authenticated operational view, and public sanitized uptime JSON; metrics needs an Admin session or `Authorization: Bearer $METRICS_TOKEN` |
 | History | `/activity`, `/bots/[botId]` | order lifecycle filtering and per-bot order history; unlinked Alpaca snapshots remain explicitly external |
+
+`/status` is an Admin-only server-rendered operational view. It checks MySQL with `SELECT 1`, reads the worker heartbeat file, checks the durable authenticated Alpaca market-stream heartbeat, and calls the existing Alpaca Paper adapter health check. It also shows bot lifecycle counts. The worker owns exactly one WebSocket connection for the fixed ten-symbol universe; it persists immutable bars/quotes and reconnects with bounded backoff, while the REST cycle provides reconciliation/backfill and the idempotent evaluation boundary. OpenAI is reported as configured only when the optional advisory feature flag and server-only key are present; that status is configuration readiness, not a provider call. SMTP and webhook entries describe configuration readiness only because delivery is not wired. Secrets and destinations remain server-only.
+
+`GET /api/status` is deliberately public so external uptime monitors can consume the same operational view without a session. It returns only a derived overall state, ISO check time, aggregate bot counts, and the already-sanitized service labels/states/details from `getSystemStatus`. It must not expose raw failures, hostnames, credentials, recipients, webhook destinations, account IDs, or configuration values. It uses `Cache-Control: no-store`; monitoring clients should poll at a modest interval (for example, once a minute), not treat it as a streaming endpoint.
 
 API schemas use Zod. Add endpoint-specific tests for authorization and invalid input when extending them.
 
@@ -137,7 +141,8 @@ Bot creation performs the same pure capital validation in the client for early f
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | first boot | Initial Admin only |
 | `ALPACA_PAPER_BASE_URL`, `ALPACA_API_KEY`, `ALPACA_API_SECRET` | for global broker sync | One server-only Alpaca Paper credential pair; never requested per virtual wallet |
 | `ALPACA_DATA_FEED` | optional | Current default is `iex` |
-| `AI_ENABLED` | optional | Reserved; no AI adapter is wired yet |
+| `AI_ENABLED` | optional | Enables the optional OpenAI advisory for deterministic `BUY`/`SELL` candidates only; it cannot approve or execute orders |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_MS`, `AI_MAX_ANALYSES_PER_BOT_PER_DAY` | when AI enabled | Server-only OpenAI advisory configuration, default model/timeout/cap; requests use structured output and `store: false` |
 | `SMTP_*` | optional | SMTP connection readiness for future alert delivery; no sender is wired yet |
 | `METRICS_TOKEN` | optional | At least 32 characters when set; bearer protection for Prometheus scraping when no Admin session is used |
 
@@ -156,9 +161,13 @@ Suggested test ownership:
 
 ### Current market cycle
 
-`AlpacaMarketDataAdapter` reads Alpaca Market Data REST with the configured Paper credentials and feed. Each cycle backfills/persists completed one-minute bars, obtains the latest quote, then evaluates the active bot's allowed symbol with shared `SPY` and `QQQ` regime context. `MarketEvaluation` prevents duplicate work for a candle. `trend-v1` is deterministic and persists the inputs and signal before invoking risk.
+`AlpacaMarketDataAdapter` reads Alpaca Market Data REST with the configured Paper credentials and feed. Each cycle backfills/persists completed one-minute bars, obtains the latest quote, then evaluates the active bot's allowed symbol with shared `SPY` and `QQQ` regime context. `MarketEvaluation` prevents duplicate work for a candle. `trend-v1` is deterministic and persists the inputs and signal before any AI review or risk evaluation.
 
-The cycle uses REST polling today, not a browser connection and not a WebSocket. A future WebSocket manager must feed the same persistence/idempotency boundary, retain REST backfill for gaps, and never bypass the risk/execution path. Global reconciliation is executed once per cycle; broker orders with a BrAIker `client_order_id` are attributed to the originating virtual wallet through the internal order → proposal → bot trace. Broker-only orders remain associated with the default global wallet.
+When `AI_ENABLED=true`, an eligible deterministic `BUY`/`SELL` candidate can call `OpenAiAdvisor` through the Responses API with a structured, redacted market/signal payload and a strict timeout. The review is capped per bot per UTC day, and records `AiDecision` metadata including sanitized request/response, token counts, Decimal cost estimate, or sanitized provider failure. `REJECT` stops that candidate before risk; `PROCEED` and `CAUTION` have no approval authority, and a timeout/malformed/failed review falls back to the deterministic risk path. Neither the browser nor tests call the provider, and no provider result can alter capital, limits, the Kill Switch, or idempotent order submission.
+
+`/decisions/[proposalId]` reads the persisted causal record for an authorized wallet member and renders an English report of snapshot, indicators, deterministic signal, optional AI advisory, risk checks, execution state, and fills. Reports are read-only and do not expose secrets.
+
+The worker also owns one persistent Alpaca market-data WebSocket for the fixed ten-symbol universe, never the browser and never one socket per bot. It authenticates after connection, subscribes to one-minute bars and quotes, persists immutable provider events and completed bars, and reconnects with bounded exponential backoff. It writes a durable authenticated heartbeat that `/status` and `/api/status` read. REST backfill remains active for gaps and the `MarketEvaluation` key remains the decision idempotency boundary, so streaming never bypasses risk or execution. Global reconciliation is executed once per cycle; broker orders with a BrAIker `client_order_id` are attributed to the originating virtual wallet through the internal order → proposal → bot trace. Broker-only orders remain associated with the default global wallet.
 
 Required completion command sequence:
 

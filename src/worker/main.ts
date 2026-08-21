@@ -10,6 +10,9 @@ import { processOneExecutionJob } from "@/modules/execution/execution-worker";
 import { ensureGlobalPaperWallet, syncGlobalPaperAccount } from "@/modules/broker/paper-sync";
 import { processMarketCycle } from "@/modules/market/market-runner";
 import { isIntervalCronDue } from "@/modules/scheduler/schedule-policy";
+import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
+import { globalPaperCredentials } from "@/modules/broker/global-paper";
+import { AlpacaMarketStreamManager } from "@/modules/market/alpaca-market-stream";
 
 async function reconcilePortfolio() {
   await syncGlobalPaperAccount();
@@ -33,13 +36,33 @@ async function main() {
     ensureTask("portfolio-reconciliation", "*/5 * * * *"),
     ensureTask("market-cycle", "*/1 * * * *")
   ]);
-  const heartbeat = async () => { workerHeartbeat.set(Date.now()); await writeFile("/tmp/braiker-worker-heartbeat", String(Date.now())); };
+  const marketStream = new AlpacaMarketStreamManager({
+    credentials: globalPaperCredentials(),
+    feed: config.ALPACA_DATA_FEED,
+    // The initial universe is deliberately fixed and bounded. This is one
+    // shared connection, not one connection per bot or wallet.
+    symbols: ALLOWED_TRADING_SYMBOLS
+  });
+  await marketStream.start();
+  const heartbeat = async () => {
+    workerHeartbeat.set(Date.now());
+    await writeFile("/tmp/braiker-worker-heartbeat", String(Date.now()));
+    await marketStream.recordHeartbeat().catch((error) => logger.warn({ err: error }, "Unable to record market-stream heartbeat"));
+  };
   cron.schedule("*/1 * * * *", () => void runTask("lease-recovery", async () => { await expireLeases(); await heartbeat(); }), { timezone: "UTC" });
   cron.schedule("*/1 * * * *", () => void runReconciliationIfDue(), { timezone: "UTC" });
   cron.schedule("5 * * * * *", () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
   cron.schedule("*/30 * * * * *", () => void processOneExecutionJob(), { timezone: "UTC" });
   await heartbeat();
   logger.info({ tradingMode: config.TRADING_MODE }, "Braiker worker started in paper-only mode");
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, "Braiker worker stopping");
+    marketStream.stop();
+    await prisma.$disconnect();
+    process.exit(0);
+  };
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 main().catch(async (error) => { logger.fatal({ err: error }, "Worker failed to start"); await prisma.$disconnect(); process.exit(1); });
