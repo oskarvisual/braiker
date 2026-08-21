@@ -47,7 +47,7 @@ The initial values shown in the table are defaults, not hard-coded product behav
 - Survival is always enabled. It is not a profile setting and must not appear as an optional switch.
 - The product invariant is that `currentCapital = 0` makes a bot `DEAD`, irreversibly. A dead bot cannot be reactivated, edited, deleted, or repurposed; its history remains.
 - Clone creates a *new* bot with a new budget and an explicit source reference. It may clone an active or dead source, but must never revive or modify the source bot.
-- The UI exposes a deterministic, read-only survival indicator (`Calibrating`, `Thriving`, `Stable`, `Cautious`, `Stressed`, `Critical`, or `Dead`) with native SVG iconography. It is never a control and cannot change risk, power, Kill Switch, capital, or execution. `Dead` always wins; before the first scan the bot is `Calibrating`; and capital that is invested in an open position or reserved for an order is treated as deployed, so low liquid cash alone must never produce a stressed/critical label.
+- The UI exposes a deterministic, read-only survival indicator (`Calibrating`, `Thriving`, `Stable`, `Cautious`, `Stressed`, `Critical`, or `Dead`) with a native emoji and color. It is never a control and cannot change risk, power, Kill Switch, capital, or execution. `Dead` always wins; before the first scan the bot is `Calibrating`; and capital that is invested in an open position or reserved for an order is treated as deployed, so low liquid cash alone must never produce a stressed/critical label. The bot table intentionally hides the decorative initial avatar so the emoji is the primary visual cue.
 
 ### Public controls
 

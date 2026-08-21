@@ -1,0 +1,3 @@
+.botSetup :global(.botNameCell > .avatar) {
+  display: none;
+}
