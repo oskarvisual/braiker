@@ -155,6 +155,10 @@ Bot creation performs the same pure capital validation in the client for early f
 | `TELEGRAM_BOT_TOKEN` | optional | Server-only Telegram Bot API token for selected alert delivery and the worker-polled Bot Manager session; it is never stored in MySQL or returned by APIs |
 | `METRICS_TOKEN` | optional | At least 32 characters when set; bearer protection for Prometheus scraping when no Admin session is used |
 
+## Staging deployment topology
+
+`app.staging.yaml` is the reproducible DigitalOcean App Platform definition and tracks the repository's `staging` branch for all three components. It creates one App Platform application containing one public web service (port 3000), one private worker (port 8080 liveness endpoint), and a `PRE_DEPLOY` Prisma migration job. The components share only the Managed MySQL connection and runtime secrets; they are not separate apps and neither runtime component carries deployment credentials. The image is built once from the Dockerfile and can run `node server.js`, `node dist/main.js`, or `npm run prisma:migrate`. Exactly one worker replica is mandatory for the Paper soak.
+
 ## Testing and change protocol
 
 The authoritative policy is [`../AGENTS.md`](../AGENTS.md): write a failing test first, make the narrow implementation pass, then run all quality gates.

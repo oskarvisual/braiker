@@ -6,7 +6,7 @@ services:
   - name: web
     github:
       repo: oskarvisual/braiker
-      branch: main
+      branch: staging
       deploy_on_push: false
     dockerfile_path: Dockerfile
     http_port: 3000
@@ -73,7 +73,7 @@ workers:
   - name: worker
     github:
       repo: oskarvisual/braiker
-      branch: main
+      branch: staging
       deploy_on_push: false
     dockerfile_path: Dockerfile
     run_command: node dist/main.js
@@ -144,7 +144,7 @@ jobs:
     kind: PRE_DEPLOY
     github:
       repo: oskarvisual/braiker
-      branch: main
+      branch: staging
       deploy_on_push: false
     dockerfile_path: Dockerfile
     run_command: npm run prisma:migrate

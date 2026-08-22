@@ -12,4 +12,12 @@ describe("Docker build context", () => {
     const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { dependencies?: Record<string, string> };
     expect(packageJson.dependencies?.prisma).toBeDefined();
   });
+
+  it("pins every DigitalOcean staging component to the staging branch with one web and one worker", () => {
+    const spec = readFileSync(resolve(process.cwd(), "app.staging.yaml"), "utf8");
+    expect(spec.match(/branch: staging/g)).toHaveLength(3);
+    expect(spec).not.toContain("branch: main");
+    expect(spec.match(/instance_count: 1/g)).toHaveLength(2);
+    expect(spec).toContain("kind: PRE_DEPLOY");
+  });
 });
