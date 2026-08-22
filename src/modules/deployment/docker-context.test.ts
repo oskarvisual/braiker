@@ -7,4 +7,9 @@ describe("Docker build context", () => {
     const dockerignore = readFileSync(resolve(process.cwd(), ".dockerignore"), "utf8");
     for (const entry of [".env", ".env.*", ".next", "dist"]) expect(dockerignore).toContain(entry);
   });
+
+  it("ships the Prisma CLI required by the pre-deploy migration job", () => {
+    const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+    expect(packageJson.dependencies?.prisma).toBeDefined();
+  });
 });

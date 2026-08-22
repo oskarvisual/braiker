@@ -30,6 +30,7 @@ This runbook is for the Personal Paper deployment only. It is never a checklist 
 7. For every submitted order, open its English Decision report from History or bot detail and verify the chain: market evaluation → strategy signal → optional AI advisory → proposal → risk decision → execution job → broker order → fill/capital event. Confirm the broker snapshot is attributed to the bot's virtual wallet.
 8. If AI is enabled, confirm it is configured with a small per-bot daily cap, inspect one completed or failed advisory record in the Decision report, and verify that provider failure did not grant an approval or bypass risk.
 9. In Settings, select `System status failure` and `OpenAI quota exhausted` for each alert channel you intend to use. Confirm the destination and SMTP configuration are correct before relying on them. Repeated failures are de-duplicated and failed deliveries retry after a bounded delay. Configure an independent uptime monitor to poll public `/api/status` once a minute: a stopped worker or unavailable database cannot send its own webhook/email alert.
+10. On the next exchange day after 08:30 ET, open **Resources** and expand the daily briefing. Confirm it records the cited sources and shows one immutable recommendation set for every living bot. A recommendation may only caution or defer an optional AI advisory; confirm the deterministic signal, risk limits, position size, and order path remain unchanged.
 
 ## Daily checks during the soak
 
@@ -37,6 +38,7 @@ This runbook is for the Personal Paper deployment only. It is never a checklist 
 - Review rejected proposals, failed execution jobs, and reconciliation changes. Do not ignore a failed or stale reconciliation.
 - Verify each ON bot stays inside its virtual capital, position cap, daily-loss cap, and trade cap.
 - Test the ON/OFF Kill Switch with a bot that has no in-flight order.
+- Review the daily Resources briefing after 08:30 ET and compare its visible per-bot recommendations with the associated bot-chat explanation or advisory record. Treat missing, duplicated, or non-conservative daily inputs as a stop-and-investigate condition.
 - Keep a single worker instance. Do not scale worker replicas while this is a one-account Paper soak.
 
 ## Stop conditions
@@ -50,6 +52,6 @@ Turn all bots OFF and investigate before continuing if any of these occurs:
 
 ## Current known gaps
 
-- The isolated MySQL security suite covers competing reservations/reconciliations, realized loss windows, and Kill Switch execution rejection. It must use a disposable database only; browser E2E coverage is still pending, so keep the manual checks above explicit during this local soak.
+- The isolated MySQL security suite covers competing reservations/reconciliations, realized loss windows, Kill Switch execution rejection, and Bot Manager transcript ownership/idempotency. It must use a disposable database only; browser E2E coverage is still pending, so keep the manual checks above explicit during this local soak.
 
 Do not promote this environment to live trading. A live deployment requires a separate app, database, secrets, security review, and its own soak period.

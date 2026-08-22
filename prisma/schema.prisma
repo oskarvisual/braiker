@@ -37,6 +37,51 @@ enum BotLifeStatus {
   DEAD
 }
 
+/// The global, non-trading BrAIker manager keeps conversations separate from
+/// individual trading bots. Operations is the pinned, alert-backed session.
+enum ManagerChatSessionKind {
+  OPERATIONS
+  CONVERSATION
+}
+
+enum ManagerChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum ManagerChatMessageSource {
+  WEB
+  TELEGRAM
+  TELEGRAM_ALERT
+  SYSTEM
+}
+
+/// A proposed management change is separate from a conversational reply.
+/// Only the small allowlist below may be executed after a human confirmation.
+enum ManagerActionKind {
+  TURN_ON
+  TURN_OFF
+}
+
+enum ManagerActionProposalStatus {
+  PENDING
+  CONFIRMING
+  EXECUTED
+  EXPIRED
+  FAILED
+}
+
+enum ResourceCategory {
+  MACRO
+  NEWS
+  FILINGS
+  EARNINGS
+  SENTIMENT
+  ETF_ROTATION
+  TECHNICAL
+}
+
 enum TradeAction {
   BUY
   SELL
@@ -77,6 +122,92 @@ model User {
   sessions     Session[]
   memberships  WalletMember[]
   auditLogs    AuditLog[]
+  telegramManagerSessions TelegramManagerSession[]
+  telegramPairingCodes TelegramPairingCode[]
+  managerChatSessions ManagerChatSession[]
+  botChatSessions BotChatSession[]
+  managerActionProposals ManagerActionProposal[]
+  resourceSources ResourceSource[]
+}
+
+/// URL-only curated source registry. Source pages are untrusted input and
+/// snapshots retain only bounded text evidence, never files or binaries.
+model ResourceSource {
+  id              String           @id @default(uuid()) @db.Char(36)
+  category        ResourceCategory
+  name            String           @db.VarChar(160)
+  url             String           @unique @db.VarChar(191)
+  hostname        String           @db.VarChar(191)
+  active          Boolean          @default(false)
+  autoActivated   Boolean          @default(false)
+  reviewStatus    String           @default("PENDING") @db.VarChar(24)
+  refreshMinutes  Int              @default(1440)
+  lastFetchedAt   DateTime?        @db.DateTime(3)
+  nextRefreshAt   DateTime?        @db.DateTime(3)
+  lastError       String?          @db.VarChar(1000)
+  proposedById    String?          @db.Char(36)
+  createdAt       DateTime         @default(now()) @db.DateTime(3)
+  updatedAt       DateTime         @updatedAt @db.DateTime(3)
+  proposedBy      User?            @relation(fields: [proposedById], references: [id], onDelete: SetNull)
+  snapshots       ResourceSnapshot[]
+  briefResources  DailyBriefResource[]
+  @@index([category, active, nextRefreshAt])
+  @@index([reviewStatus, updatedAt])
+}
+
+model ResourceSnapshot {
+  id           String         @id @default(uuid()) @db.Char(36)
+  sourceId     String         @db.Char(36)
+  canonicalUrl String         @db.VarChar(191)
+  title        String         @db.VarChar(500)
+  contentHash  String         @db.Char(64)
+  excerpt      String         @db.Text
+  summary      String?        @db.Text
+  relevance    String         @default("PENDING") @db.VarChar(24)
+  fetchedAt    DateTime       @db.DateTime(3)
+  createdAt    DateTime       @default(now()) @db.DateTime(3)
+  source       ResourceSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  briefs       DailyBriefResource[]
+  @@index([sourceId, fetchedAt])
+  @@index([contentHash])
+}
+
+/// Immutable pre-market context assembled from reviewed public resources.
+model DailyMarketBrief {
+  id          String               @id @default(uuid()) @db.Char(36)
+  marketDate  DateTime             @unique @db.Date
+  status      String               @default("GENERATED") @db.VarChar(24)
+  content     Json
+  generatedAt DateTime             @default(now()) @db.DateTime(3)
+  resources   DailyBriefResource[]
+  botInputs   DailyBotInput[]
+}
+
+model DailyBriefResource {
+  briefId    String           @db.Char(36)
+  sourceId   String           @db.Char(36)
+  snapshotId String           @db.Char(36)
+  brief      DailyMarketBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  source     ResourceSource   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  snapshot   ResourceSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  @@id([briefId, sourceId, snapshotId])
+  @@index([sourceId])
+  @@index([snapshotId])
+}
+
+/// Immutable, per-bot interpretation of the daily briefing. Its deterministic
+/// recommendations may only add caution or defer a candidate.
+model DailyBotInput {
+  id                 String           @id @default(uuid()) @db.Char(36)
+  botId              String           @db.Char(36)
+  dailyMarketBriefId String           @db.Char(36)
+  marketDate         DateTime         @db.Date
+  content            Json
+  createdAt          DateTime         @default(now()) @db.DateTime(3)
+  bot                BotInstance      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  dailyMarketBrief   DailyMarketBrief @relation(fields: [dailyMarketBriefId], references: [id], onDelete: Cascade)
+  @@unique([botId, marketDate])
+  @@index([dailyMarketBriefId])
 }
 
 model LoginThrottle {
@@ -174,6 +305,9 @@ model BotInstance {
   botPositions   BotPosition[]
   portfolioSnapshots PortfolioSnapshot[]
   scanRuns       BotScanRun[]
+  managerActionProposals ManagerActionProposal[]
+  botChatSessions BotChatSession[]
+  dailyInputs    DailyBotInput[]
   @@index([walletId, status])
   @@index([cloneSourceId])
 }
@@ -561,6 +695,9 @@ model NotificationSettings {
   emailEnabled        Boolean  @default(false)
   emailRecipients     Json
   emailEvents         Json
+  telegramEnabled     Boolean  @default(false)
+  telegramEvents      Json
+  telegramReceiveMessages Boolean @default(false)
   createdAt           DateTime @default(now()) @db.DateTime(3)
   updatedAt           DateTime @updatedAt @db.DateTime(3)
 }
@@ -585,10 +722,138 @@ model NotificationAlert {
   emailDeliveredAt       DateTime? @db.DateTime(3)
   emailLastAttemptAt     DateTime? @db.DateTime(3)
   emailLastError         String?  @db.VarChar(1000)
+  telegramDeliveredAt    DateTime? @db.DateTime(3)
+  telegramLastAttemptAt  DateTime? @db.DateTime(3)
+  telegramLastError      String?  @db.VarChar(1000)
   createdAt              DateTime @default(now()) @db.DateTime(3)
   updatedAt              DateTime @updatedAt @db.DateTime(3)
   @@index([status, lastObservedAt])
   @@index([eventType, status])
+}
+
+/// The globally paired, read-only Telegram conversation for the Bot Manager.
+/// The chat identifier is never returned through browser APIs or logs.
+model TelegramManagerSession {
+  scope          String   @id @default("global") @db.VarChar(32)
+  telegramChatId String   @unique @db.VarChar(64)
+  userId         String   @db.Char(36)
+  linkedAt       DateTime @default(now()) @db.DateTime(3)
+  lastReceivedAt DateTime? @db.DateTime(3)
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       TelegramManagerMessage[]
+  @@index([userId])
+}
+
+/// One-time pairing credentials are hashed at rest and expire quickly.
+model TelegramPairingCode {
+  id         String   @id @default(uuid()) @db.Char(36)
+  codeHash   String   @unique @db.Char(64)
+  userId     String   @db.Char(36)
+  expiresAt  DateTime @db.DateTime(3)
+  consumedAt DateTime? @db.DateTime(3)
+  createdAt  DateTime @default(now()) @db.DateTime(3)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([expiresAt])
+}
+
+/// Stores only the next Telegram update offset, making worker restarts idempotent.
+model TelegramRuntimeState {
+  scope        String   @id @default("global") @db.VarChar(32)
+  nextUpdateId String?  @db.VarChar(64)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+  updatedAt    DateTime @updatedAt @db.DateTime(3)
+}
+
+/// Read-only, user-owned conversation sessions for the global Bot Manager.
+/// They have no execution authority and never contain credentials.
+model ManagerChatSession {
+  id          String                  @id @default(uuid()) @db.Char(36)
+  userId      String                  @db.Char(36)
+  kind        ManagerChatSessionKind
+  title       String                  @db.VarChar(120)
+  pinned      Boolean                 @default(false)
+  externalKey String?                 @unique @db.VarChar(191)
+  createdAt   DateTime                @default(now()) @db.DateTime(3)
+  updatedAt   DateTime                @updatedAt @db.DateTime(3)
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    ManagerChatMessage[]
+  @@index([userId, pinned, updatedAt])
+}
+
+/// Message transcript for the global Bot Manager. `sourceReference` makes
+/// alert/retry delivery idempotent without storing a Telegram secret.
+model ManagerChatMessage {
+  id              String                   @id @default(uuid()) @db.Char(36)
+  sessionId       String                   @db.Char(36)
+  sourceReference String?                  @unique @db.VarChar(191)
+  role            ManagerChatMessageRole
+  source          ManagerChatMessageSource
+  content         String                   @db.Text
+  metadata        Json?
+  createdAt       DateTime                 @default(now()) @db.DateTime(3)
+  session         ManagerChatSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId, createdAt])
+}
+
+/// A durable, single-use action proposal. The confirmation code is hashed at
+/// rest; execution always re-enters the ordinary locked bot-control service.
+model ManagerActionProposal {
+  id              String                      @id @default(uuid()) @db.Char(36)
+  userId          String                      @db.Char(36)
+  botId           String                      @db.Char(36)
+  action          ManagerActionKind
+  status          ManagerActionProposalStatus @default(PENDING)
+  codeHash        String                      @db.Char(64)
+  requestedVia    String                      @db.VarChar(24)
+  expiresAt       DateTime                    @db.DateTime(3)
+  confirmedAt     DateTime?                   @db.DateTime(3)
+  executedAt      DateTime?                   @db.DateTime(3)
+  failureReason   String?                     @db.VarChar(120)
+  createdAt       DateTime                    @default(now()) @db.DateTime(3)
+  updatedAt       DateTime                    @updatedAt @db.DateTime(3)
+  user            User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bot             BotInstance                 @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([userId, status, expiresAt])
+  @@index([botId, createdAt])
+}
+
+/// Private explanation transcript for one user and one bot. It is not a
+/// command channel and is intentionally isolated from Manager conversations.
+model BotChatSession {
+  id        String           @id @default(uuid()) @db.Char(36)
+  userId    String           @db.Char(36)
+  botId     String           @db.Char(36)
+  createdAt DateTime         @default(now()) @db.DateTime(3)
+  updatedAt DateTime         @updatedAt @db.DateTime(3)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bot       BotInstance      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  messages  BotChatMessage[]
+  @@unique([botId, userId])
+  @@index([userId, updatedAt])
+}
+
+model BotChatMessage {
+  id        String                 @id @default(uuid()) @db.Char(36)
+  sessionId String                 @db.Char(36)
+  role      ManagerChatMessageRole
+  content   String                 @db.Text
+  createdAt DateTime               @default(now()) @db.DateTime(3)
+  session   BotChatSession         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId, createdAt])
+}
+
+/// Read-only Bot Manager conversation history; pairing secrets are redacted.
+model TelegramManagerMessage {
+  id               String   @id @default(uuid()) @db.Char(36)
+  sessionScope     String   @db.VarChar(32)
+  telegramUpdateId String?  @unique @db.VarChar(64)
+  direction        String   @db.VarChar(16)
+  content          String   @db.VarChar(4000)
+  createdAt        DateTime @default(now()) @db.DateTime(3)
+  session          TelegramManagerSession @relation(fields: [sessionScope], references: [scope], onDelete: Cascade)
+  @@index([sessionScope, createdAt])
 }
 
 /// Persistent provider circuit breaker. The OpenAI advisory is disabled only
@@ -602,6 +867,17 @@ model AiRuntimeState {
   lastError      String?  @db.VarChar(128)
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt @db.DateTime(3)
+}
+
+/// Shared liveness state written by the worker and read by the web process.
+/// This must remain durable because App Platform components do not share /tmp.
+model WorkerRuntimeState {
+  scope       String   @id @default("global") @db.VarChar(32)
+  instanceId  String   @db.VarChar(128)
+  startedAt   DateTime @db.DateTime(3)
+  heartbeatAt DateTime @db.DateTime(3)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
 }
 
 /// Administrator-managed defaults for the three editable limits of each bot

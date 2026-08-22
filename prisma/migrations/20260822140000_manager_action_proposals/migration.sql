@@ -1,0 +1,20 @@
+CREATE TABLE `ManagerActionProposal` (
+  `id` CHAR(36) NOT NULL,
+  `userId` CHAR(36) NOT NULL,
+  `botId` CHAR(36) NOT NULL,
+  `action` ENUM('TURN_ON', 'TURN_OFF') NOT NULL,
+  `status` ENUM('PENDING', 'CONFIRMING', 'EXECUTED', 'EXPIRED', 'FAILED') NOT NULL DEFAULT 'PENDING',
+  `codeHash` CHAR(64) NOT NULL,
+  `requestedVia` VARCHAR(24) NOT NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `confirmedAt` DATETIME(3) NULL,
+  `executedAt` DATETIME(3) NULL,
+  `failureReason` VARCHAR(120) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `ManagerActionProposal_userId_status_expiresAt_idx`(`userId`, `status`, `expiresAt`),
+  INDEX `ManagerActionProposal_botId_createdAt_idx`(`botId`, `createdAt`),
+  CONSTRAINT `ManagerActionProposal_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `ManagerActionProposal_botId_fkey` FOREIGN KEY (`botId`) REFERENCES `BotInstance`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

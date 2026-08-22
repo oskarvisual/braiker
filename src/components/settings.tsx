@@ -1,14 +1,24 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, type ReactNode, useState } from "react";
 import { useToast } from "@/components/toast";
 
 type Wallet = { id: string; name: string; currency: string; managedCapital: string; unallocatedCapital: string };
 type PaperCapital = { managedCapital: string; availableCapital: string; allocatedCapital: string };
 type SyncSettings = { enabled: boolean; intervalMinutes: number; timezone: string };
-type NotificationSettings = { webhook: { enabled: boolean; configured: boolean; events: string[] }; email: { enabled: boolean; recipients: string[]; events: string[] }; smtpConfigured: boolean };
+type NotificationSettings = { webhook: { enabled: boolean; configured: boolean; events: string[] }; email: { enabled: boolean; recipients: string[]; events: string[] }; telegram: { enabled: boolean; configured: boolean; paired: boolean; receiveMessages: boolean; events: string[] }; smtpConfigured: boolean };
 type NotificationEvent = { id: string; label: string; description: string };
 type BotProfile = { id: string; name: string; description: string; avatar: string; riskPolicy: { maxPositionSize: string; maxDailyLoss: string; maxTradesPerDay: number } };
+type NotificationChannelId = "webhook" | "email" | "telegram";
+
+function NotificationChannel({ id, title, isOpen, onToggle, children }: { id: NotificationChannelId; title: string; isOpen: boolean; onToggle: () => void; children: ReactNode }) {
+  return <section className="notificationChannel">
+    <button type="button" className="notificationChannelToggle" aria-expanded={isOpen} aria-controls={`notification-channel-${id}`} onClick={onToggle}>
+      <span>{title}</span><i aria-hidden="true">⌄</i>
+    </button>
+    {isOpen && <div id={`notification-channel-${id}`} className="notificationChannelContent">{children}</div>}
+  </section>;
+}
 
 function humanError(code: string) {
   if (code === "INSUFFICIENT_PAPER_CAPITAL") return "There is not enough unassigned virtual capital. Increase the global Paper capital or free capital from another wallet.";
@@ -19,6 +29,9 @@ function humanError(code: string) {
   if (code === "MAX_DAILY_LOSS_EXCEEDS_PROFILE_ENVELOPE") return "The daily-loss cap exceeds this personality's permanent weekly-loss safety envelope.";
   if (code === "MAX_TRADES_EXCEEDS_PROFILE_ENVELOPE") return "The trade count exceeds this personality's permanent safety envelope.";
   if (code === "INVALID_PROFILE_DEFAULTS") return "Enter positive values for all three profile defaults.";
+  if (code === "TELEGRAM_NOT_CONFIGURED") return "Telegram is not configured in the server environment yet.";
+  if (code === "TELEGRAM_PAIRING_FAILED") return "Telegram pairing could not be created. Please try again.";
+  if (code === "NOTIFICATION_SETTINGS_UPDATE_FAILED") return "Alert preferences could not be saved. Please try again.";
   return code || "Please try again.";
 }
 
@@ -29,7 +42,9 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
   const [managedCapital, setManagedCapital] = useState(initialPaperCapital.managedCapital);
   const [sync, setSync] = useState(initialSync);
   const [notifications, setNotifications] = useState(initialNotifications);
+  const [openNotificationChannel, setOpenNotificationChannel] = useState<NotificationChannelId | null>("webhook");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [telegramPairing, setTelegramPairing] = useState<{ code: string; expiresAt: string } | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [walletName, setWalletName] = useState("");
   const [walletCapital, setWalletCapital] = useState("100");
@@ -48,7 +63,8 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
   function openProfileModal(profile: BotProfile) { setEditingProfile(profile); setProfilePosition(profile.riskPolicy.maxPositionSize); setProfileDailyLoss(profile.riskPolicy.maxDailyLoss); setProfileTrades(String(profile.riskPolicy.maxTradesPerDay)); }
   function closeProfileModal() { setEditingProfile(null); }
   function openCapitalModal(wallet: Wallet) { setCapitalWallet(wallet); setCapitalAmount(""); setCapitalDirection("ADD"); }
-  function toggleEvent(channel: "webhook" | "email", eventId: string) {
+  function toggleNotificationChannel(channel: NotificationChannelId) { setOpenNotificationChannel((current) => current === channel ? null : channel); }
+  function toggleEvent(channel: "webhook" | "email" | "telegram", eventId: string) {
     setNotifications((current) => ({ ...current, [channel]: { ...current[channel], events: current[channel].events.includes(eventId) ? current[channel].events.filter((id) => id !== eventId) : [...current[channel].events, eventId] } }));
   }
   async function savePaperCapital(event: FormEvent<HTMLFormElement>) {
@@ -68,10 +84,18 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
   }
   async function saveNotifications(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true);
-    const response = await fetch("/api/settings/notifications", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ webhook: { enabled: notifications.webhook.enabled, url: webhookUrl, events: notifications.webhook.events }, email: notifications.email }) });
+    const response = await fetch("/api/settings/notifications", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ webhook: { enabled: notifications.webhook.enabled, url: webhookUrl, events: notifications.webhook.events }, email: notifications.email, telegram: { enabled: notifications.telegram.enabled, receiveMessages: notifications.telegram.receiveMessages, events: notifications.telegram.events } }) });
     const body = await response.json(); setSaving(false);
     if (!response.ok) { pushToast({ tone: "error", title: "Alert preferences were not saved", message: body.error ?? "Please try again." }); return; }
     setNotifications(body); setWebhookUrl(""); pushToast({ tone: "success", title: "Alert preferences saved" });
+  }
+  async function createTelegramPairing() {
+    setSaving(true);
+    const response = await fetch("/api/settings/telegram/pairing", { method: "POST" });
+    const body = await response.json(); setSaving(false);
+    if (!response.ok) { pushToast({ tone: "error", title: "Telegram pairing was not created", message: humanError(body.error) }); return; }
+    setTelegramPairing({ code: body.code, expiresAt: body.expiresAt });
+    pushToast({ tone: "success", title: "Pairing code created", message: "Send it to the Bot Manager in Telegram before it expires." });
   }
   async function saveWallet(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true);
@@ -112,10 +136,24 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
       <section className="panel settingsPanel"><div className="panelHeading"><div><p className="eyebrow">GLOBAL PAPER CAPITAL</p><h2>Virtual capital pool</h2></div><button className="compactButton" onClick={() => setShowWalletModal(true)}>Add wallet</button></div><p className="muted">Alpaca credentials are server-only environment variables. Wallets below are virtual portfolios that share this one Paper account; creating one never transfers money at Alpaca.</p><div className="paperCapitalStats"><span><small>Enabled in BrAIker</small><strong>${paperCapital.managedCapital}</strong></span><span><small>Assigned to wallets</small><strong>${paperCapital.allocatedCapital}</strong></span><span><small>Available to assign</small><strong>${paperCapital.availableCapital}</strong></span></div><form className="settingsControl" onSubmit={savePaperCapital}><label>Global Paper capital (USD)<input type="number" min="0" step="0.01" value={managedCapital} onChange={(event) => setManagedCapital(event.target.value)} required /></label><small className="muted">This is BrAIker’s safety envelope. It may not exceed the cash reported by the one Alpaca Paper account.</small><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save global capital"}</button></form><div className="walletSettingsList">{wallets.map((wallet) => <article key={wallet.id}><div><strong>{wallet.name}</strong><small>{wallet.currency} · ${wallet.unallocatedCapital} unassigned of ${wallet.managedCapital}</small></div><div className="walletActions"><span className="connectionStatus connected">Global Paper account</span><button type="button" className="secondaryButton" onClick={() => openCapitalModal(wallet)}>Manage budget</button></div></article>)}</div></section>
       <section className="panel settingsPanel"><div><p className="eyebrow">AUTOMATION</p><h2>Portfolio synchronization</h2></div><p className="muted">The worker reconciles the one Paper account, positions and orders on this schedule. Manual sync remains available from the dashboard.</p><form className="settingsControl" onSubmit={saveSync}><label className="toggleRow"><input type="checkbox" checked={sync.enabled} onChange={(event) => setSync((current) => ({ ...current, enabled: event.target.checked }))} /><span><strong>Automatic sync</strong><small>Run global reconciliation in the background.</small></span></label><label>Frequency<select value={sync.intervalMinutes} onChange={(event) => setSync((current) => ({ ...current, intervalMinutes: Number(event.target.value) }))} disabled={!sync.enabled}>{[1, 5, 15, 30, 60].map((minutes) => <option key={minutes} value={minutes}>Every {minutes} {minutes === 1 ? "minute" : "minutes"}</option>)}</select></label><small className="muted">Timezone: {sync.timezone}. Changes apply on the next worker minute.</small><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save synchronization"}</button></form></section>
     </div>
-    <section className="panel settingsPanel notificationPanel"><div><p className="eyebrow">ALERTS</p><h2>Webhooks and email</h2><p className="muted">Choose which operating events should notify you. Webhook URLs are encrypted at rest and never displayed again.</p></div><form className="notificationForm" onSubmit={saveNotifications}>
-      <div className="notificationChannel"><label className="toggleRow"><input type="checkbox" checked={notifications.webhook.enabled} onChange={(event) => setNotifications((current) => ({ ...current, webhook: { ...current.webhook, enabled: event.target.checked } }))} /><span><strong>Webhook alerts</strong><small>{notifications.webhook.configured ? "A secure destination is saved. Enter a URL below only to replace it." : "Use an HTTPS endpoint from Slack, Discord, Zapier, or your own service."}</small></span></label><label>Webhook URL<input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notifications.webhook.configured ? "Configured — leave blank to keep it" : "https://hooks.example.com/braiker"} disabled={!notifications.webhook.enabled} /></label><div className="eventOptions">{notificationEvents.map((event) => <label key={`webhook-${event.id}`}><input type="checkbox" checked={notifications.webhook.events.includes(event.id)} onChange={() => toggleEvent("webhook", event.id)} disabled={!notifications.webhook.enabled} /><span><strong>{event.label}</strong><small>{event.description}</small></span></label>)}</div></div>
-      <div className="notificationChannel"><label className="toggleRow"><input type="checkbox" checked={notifications.email.enabled} onChange={(event) => setNotifications((current) => ({ ...current, email: { ...current.email, enabled: event.target.checked } }))} /><span><strong>Email alerts</strong><small>{notifications.smtpConfigured ? "SMTP is configured in the environment." : "Add SMTP_HOST and related SMTP values in .env before delivery can be activated."}</small></span></label><label>Recipients<input type="text" value={notifications.email.recipients.join(", ")} onChange={(event) => setNotifications((current) => ({ ...current, email: { ...current.email, recipients: event.target.value.split(",").map((recipient) => recipient.trim()).filter(Boolean) } }))} placeholder="you@example.com, team@example.com" disabled={!notifications.email.enabled} /></label><div className="eventOptions">{notificationEvents.map((event) => <label key={`email-${event.id}`}><input type="checkbox" checked={notifications.email.events.includes(event.id)} onChange={() => toggleEvent("email", event.id)} disabled={!notifications.email.enabled} /><span><strong>{event.label}</strong><small>{event.description}</small></span></label>)}</div></div>
-      <div className="notificationActions"><p className="muted">Selected operational failures are delivered once per channel, then retried at a bounded interval until delivery succeeds. SMTP must be configured for email.</p><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save alert preferences"}</button></div>
+    <section className="panel settingsPanel notificationPanel"><div><p className="eyebrow">NOTIFICATIONS</p><h2>Alerts, reports and Telegram</h2><p className="muted">Choose which operating alerts and Bot Manager reports should notify you. Webhook URLs are encrypted at rest and Telegram secrets remain server-only.</p></div><form className="notificationForm" onSubmit={saveNotifications}>
+      <NotificationChannel id="webhook" title="Webhook alerts" isOpen={openNotificationChannel === "webhook"} onToggle={() => toggleNotificationChannel("webhook")}>
+        <label className="toggleRow"><input type="checkbox" checked={notifications.webhook.enabled} onChange={(event) => setNotifications((current) => ({ ...current, webhook: { ...current.webhook, enabled: event.target.checked } }))} /><span><strong>Enable webhook alerts</strong><small>{notifications.webhook.configured ? "A secure destination is saved. Enter a URL below only to replace it." : "Use an HTTPS endpoint from Slack, Discord, Zapier, or your own service."}</small></span></label>
+        <label>Webhook URL<input type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notifications.webhook.configured ? "Configured — leave blank to keep it" : "https://hooks.example.com/braiker"} disabled={!notifications.webhook.enabled} /></label>
+        <div className="eventOptions">{notificationEvents.map((event) => <label key={`webhook-${event.id}`}><input type="checkbox" checked={notifications.webhook.events.includes(event.id)} onChange={() => toggleEvent("webhook", event.id)} disabled={!notifications.webhook.enabled} /><span><strong>{event.label}</strong><small>{event.description}</small></span></label>)}</div>
+      </NotificationChannel>
+      <NotificationChannel id="email" title="Email alerts" isOpen={openNotificationChannel === "email"} onToggle={() => toggleNotificationChannel("email")}>
+        <label className="toggleRow"><input type="checkbox" checked={notifications.email.enabled} onChange={(event) => setNotifications((current) => ({ ...current, email: { ...current.email, enabled: event.target.checked } }))} /><span><strong>Enable email alerts</strong><small>{notifications.smtpConfigured ? "SMTP is configured in the environment." : "Add SMTP_HOST and related SMTP values in .env before delivery can be activated."}</small></span></label>
+        <label>Recipients<input type="text" value={notifications.email.recipients.join(", ")} onChange={(event) => setNotifications((current) => ({ ...current, email: { ...current.email, recipients: event.target.value.split(",").map((recipient) => recipient.trim()).filter(Boolean) } }))} placeholder="you@example.com, team@example.com" disabled={!notifications.email.enabled} /></label>
+        <div className="eventOptions">{notificationEvents.map((event) => <label key={`email-${event.id}`}><input type="checkbox" checked={notifications.email.events.includes(event.id)} onChange={() => toggleEvent("email", event.id)} disabled={!notifications.email.enabled} /><span><strong>{event.label}</strong><small>{event.description}</small></span></label>)}</div>
+      </NotificationChannel>
+      <NotificationChannel id="telegram" title="Telegram" isOpen={openNotificationChannel === "telegram"} onToggle={() => toggleNotificationChannel("telegram")}>
+        <label className="toggleRow"><input type="checkbox" checked={notifications.telegram.enabled} onChange={(event) => setNotifications((current) => ({ ...current, telegram: { ...current.telegram, enabled: event.target.checked } }))} disabled={!notifications.telegram.configured || !notifications.telegram.paired} /><span><strong>Enable Telegram alerts</strong><small>{notifications.telegram.configured ? notifications.telegram.paired ? "A Bot Manager chat is paired. Telegram alerts use the same event choices as email and webhooks." : "Pair the Bot Manager chat before enabling alerts." : "Add TELEGRAM_BOT_TOKEN in the server environment before Telegram can be enabled."}</small></span></label>
+        <div className="eventOptions">{notificationEvents.map((event) => <label key={`telegram-${event.id}`}><input type="checkbox" checked={notifications.telegram.events.includes(event.id)} onChange={() => toggleEvent("telegram", event.id)} disabled={!notifications.telegram.enabled} /><span><strong>{event.label}</strong><small>{event.description}</small></span></label>)}</div>
+        <label className="toggleRow"><input type="checkbox" checked={notifications.telegram.receiveMessages} onChange={(event) => setNotifications((current) => ({ ...current, telegram: { ...current.telegram, receiveMessages: event.target.checked } }))} disabled={!notifications.telegram.configured || !notifications.telegram.paired} /><span><strong>Receive Bot Manager messages</strong><small>Enable the read-only Telegram session for /status, /report and /help. It cannot control bots, capital, risk limits, Kill Switches or orders.</small></span></label>
+        {notifications.telegram.configured && !notifications.telegram.paired && <div className="telegramPairing"><button type="button" className="secondaryButton" onClick={createTelegramPairing} disabled={saving}>{saving ? "Creating…" : "Pair Bot Manager chat"}</button>{telegramPairing && <p>Send <code>/start {telegramPairing.code}</code> to the Bot Manager before {new Date(telegramPairing.expiresAt).toLocaleTimeString()}. The code is not persisted in this page and disappears after refresh.</p>}</div>}
+      </NotificationChannel>
+      <div className="notificationActions"><p className="muted">Selected operational alerts and Bot Manager reports are delivered once per channel, then retried at a bounded interval until delivery succeeds. SMTP must be configured for email.</p><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save notification preferences"}</button></div>
     </form></section>
     <section className="panel settingsPanel botDefaultsPanel"><div><p className="eyebrow">BOT DEFAULTS</p><h2>Base mindsets and guardrails</h2><p className="muted">These are the starting caps for new bots. An existing bot keeps its saved limits until you edit it; then it may be set anywhere up to its current personality cap.</p></div><div className="profileDefaults">{botProfiles.map((profile) => <article key={profile.id}><i className={`avatar ${profile.avatar}`}>{profile.name.slice(0, 1)}</i><div><strong>{profile.name}</strong><small>{profile.description}</small><em>Position ≤ ${profile.riskPolicy.maxPositionSize} · daily loss ≤ ${profile.riskPolicy.maxDailyLoss} · {profile.riskPolicy.maxTradesPerDay} trades/day</em><button type="button" className="secondaryButton profileEditButton" onClick={() => openProfileModal(profile)}>Edit defaults</button></div></article>)}</div></section>
     {showWalletModal && <div className="modalOverlay" role="presentation"><section className="modalCard" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title"><div className="modalHeading"><div><p className="eyebrow">NEW VIRTUAL WALLET</p><h2 id="settings-modal-title">Add wallet</h2></div><button type="button" className="iconButton" onClick={closeWalletModal} aria-label="Close">×</button></div><form onSubmit={saveWallet}><label>Wallet name<input value={walletName} onChange={(event) => setWalletName(event.target.value)} placeholder="Trading experiments" minLength={2} maxLength={120} required /></label><label>Virtual capital (USD)<input type="number" value={walletCapital} onChange={(event) => setWalletCapital(event.target.value)} min="0.01" step="0.01" required /></label><p className="muted">Available in the global Paper pool: ${paperCapital.availableCapital}. This only reserves capital inside BrAIker; it does not move money in Alpaca.</p><button type="submit" disabled={saving}>{saving ? "Creating…" : "Create virtual wallet"}</button></form></section></div>}

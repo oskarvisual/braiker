@@ -1,8 +1,8 @@
-import { stat } from "node:fs/promises";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { globalPaperBroker } from "@/modules/broker/global-paper";
 import { getAiRuntimeState, type AiRuntimeState } from "@/modules/ai/ai-runtime-state";
+import { currentWorkerHeartbeat } from "@/modules/monitoring/worker-runtime";
 
 const WORKER_HEARTBEAT_MAX_AGE_MS = 2 * 60 * 1000;
 
@@ -16,16 +16,16 @@ type StatusDependencies = {
   workerHeartbeat: () => Promise<Date | null>;
   marketStreamHeartbeat: () => Promise<Date | null>;
   alpacaHealth: () => Promise<{ healthy: boolean }>;
-  notificationSettings: () => Promise<{ webhookEnabled: boolean; encryptedWebhookUrl: string | null; emailEnabled: boolean } | null>;
+  notificationSettings: () => Promise<{ webhookEnabled: boolean; encryptedWebhookUrl: string | null; emailEnabled: boolean; telegramEnabled: boolean; telegramReceiveMessages: boolean } | null>;
+  telegramManagerSession: () => Promise<{ scope: string } | null>;
   openAiQuotaAlert: () => Promise<boolean>;
   openAiRuntimeState: () => Promise<AiRuntimeState>;
   botCounts: () => Promise<{ on: number; off: number; dead: number }>;
-  config: { aiEnabled: boolean; smtpConfigured: boolean };
+  config: { aiEnabled: boolean; smtpConfigured: boolean; telegramConfigured: boolean };
 };
 
 async function getWorkerHeartbeat() {
-  try { return (await stat("/tmp/braiker-worker-heartbeat")).mtime; }
-  catch { return null; }
+  return currentWorkerHeartbeat();
 }
 
 async function getMarketStreamHeartbeat() {
@@ -59,7 +59,7 @@ async function statusOf(check: () => Promise<void>, healthy: SystemStatusService
 export async function getSystemStatus(overrides: Partial<StatusDependencies> = {}): Promise<SystemStatus> {
   const config = overrides.config ?? (() => {
     const runtime = env();
-    return { aiEnabled: runtime.AI_ENABLED, smtpConfigured: Boolean(runtime.SMTP_HOST && runtime.SMTP_FROM) };
+    return { aiEnabled: runtime.AI_ENABLED, smtpConfigured: Boolean(runtime.SMTP_HOST && runtime.SMTP_FROM), telegramConfigured: Boolean(runtime.TELEGRAM_BOT_TOKEN) };
   })();
   const dependencies: StatusDependencies = {
     now: overrides.now ?? (() => new Date()),
@@ -67,7 +67,8 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     workerHeartbeat: overrides.workerHeartbeat ?? getWorkerHeartbeat,
     marketStreamHeartbeat: overrides.marketStreamHeartbeat ?? getMarketStreamHeartbeat,
     alpacaHealth: overrides.alpacaHealth ?? (() => globalPaperBroker().healthCheck()),
-    notificationSettings: overrides.notificationSettings ?? (() => prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { webhookEnabled: true, encryptedWebhookUrl: true, emailEnabled: true } })),
+    notificationSettings: overrides.notificationSettings ?? (() => prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { webhookEnabled: true, encryptedWebhookUrl: true, emailEnabled: true, telegramEnabled: true, telegramReceiveMessages: true } })),
+    telegramManagerSession: overrides.telegramManagerSession ?? (() => prisma.telegramManagerSession.findUnique({ where: { scope: "global" }, select: { scope: true } })),
     openAiQuotaAlert: overrides.openAiQuotaAlert ?? (async () => (await prisma.notificationAlert.count({ where: { dedupeKey: "openai:quota", status: "OPEN" } })) > 0),
     openAiRuntimeState: overrides.openAiRuntimeState ?? (() => getAiRuntimeState()),
     botCounts: overrides.botCounts ?? (async () => {
@@ -81,12 +82,13 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     config
   };
   const checkedAt = dependencies.now();
-  const [database, heartbeat, streamHeartbeat, alpaca, notifications, openAiQuotaAlert, openAiRuntimeState, bots] = await Promise.all([
+  const [database, heartbeat, streamHeartbeat, alpaca, notifications, telegramSession, openAiQuotaAlert, openAiRuntimeState, bots] = await Promise.all([
     statusOf(dependencies.databaseCheck, { id: "database", label: "MySQL database", state: "healthy", detail: "Connected and responding." }, { id: "database", label: "MySQL database", state: "unavailable", detail: "Connection check failed." }),
     dependencies.workerHeartbeat(),
     dependencies.marketStreamHeartbeat().catch(() => null),
     dependencies.alpacaHealth(),
     dependencies.notificationSettings().catch(() => null),
+    dependencies.telegramManagerSession().catch(() => null),
     dependencies.openAiQuotaAlert().catch(() => false),
     dependencies.openAiRuntimeState().catch(() => ({ status: "ACTIVE" as const, disabledAt: null, lastCheckedAt: null })),
     dependencies.botCounts().catch(() => ({ on: 0, off: 0, dead: 0 }))
@@ -100,6 +102,13 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     : notifications?.webhookEnabled
       ? { id: "webhook", label: "Webhooks", state: "warning", detail: "Webhooks are enabled but need a saved destination." }
       : { id: "webhook", label: "Webhooks", state: "disabled", detail: "Webhook alerts are disabled." };
+  const telegram: SystemStatusService = !dependencies.config.telegramConfigured
+    ? { id: "telegram", label: "Telegram", state: "disabled", detail: "Telegram is not configured in the server environment." }
+    : !telegramSession
+      ? { id: "telegram", label: "Telegram", state: "warning", detail: "Telegram is configured but no Bot Manager chat is paired." }
+      : notifications?.telegramEnabled || notifications?.telegramReceiveMessages
+        ? { id: "telegram", label: "Telegram", state: "configured", detail: "The paired Bot Manager chat can receive selected alerts and read-only messages." }
+        : { id: "telegram", label: "Telegram", state: "configured", detail: "A Bot Manager chat is paired; alerts and messages are disabled." };
   const quotaPaused = openAiRuntimeState.status === "QUOTA_EXHAUSTED" || openAiQuotaAlert;
   const openAi: SystemStatusService = quotaPaused
     ? { id: "openai", label: "OpenAI / AI", state: "warning", detail: "OpenAI advisory is paused because the provider reported quota or billing unavailable. Deterministic safeguards continue to run. An administrator can perform a minimal availability check to reactivate it." }
@@ -119,7 +128,8 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
         : { id: "alpaca", label: "Alpaca Paper API", state: "unavailable", detail: "Paper account connectivity check failed." },
       openAi,
       smtp,
-      webhook
+      webhook,
+      telegram
     ],
     bots,
     openAi: { quotaPaused, reactivationAllowed: dependencies.config.aiEnabled && quotaPaused }

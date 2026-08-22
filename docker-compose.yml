@@ -17,9 +17,11 @@ services:
     build: .
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env}
+    environment:
+      WORKER_HEALTH_PORT: 3001
     command: node dist/main.js
     healthcheck:
-      test: ["CMD", "node", "-e", "const fs=require('fs'); try { const age=Date.now()-fs.statSync('/tmp/braiker-worker-heartbeat').mtimeMs; process.exit(age < 120000 ? 0 : 1); } catch { process.exit(1); }"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

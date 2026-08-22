@@ -8,7 +8,7 @@ const operationalItems: NavigationItem[] = [
 ];
 
 export function sidebarNavigationItems(role: AppRole): NavigationItem[] {
-  return role === "ADMIN" ? [...operationalItems, { href: "/setup", label: "Bots" }] : operationalItems;
+  return role === "ADMIN" ? [...operationalItems, { href: "/manager", label: "Bot Manager" }, { href: "/resources", label: "Resources" }, { href: "/setup", label: "Bots" }] : operationalItems;
 }
 
 export function accountMenuItems(role: AppRole): NavigationItem[] {

@@ -70,4 +70,14 @@ describe("Alpaca market stream protocol", () => {
     expect(persist).toHaveBeenLastCalledWith([{ type: "success", message: "heartbeat" }]);
     manager.stop();
   });
+
+  it("replaces subscriptions when active watchlists change while retaining market benchmarks", async () => {
+    const socket = new FakeSocket();
+    const manager = new AlpacaMarketStreamManager({ credentials: { apiKey: "paper-key", apiSecret: "paper-secret" }, feed: "iex", symbols: ["SPY", "QQQ", "AAPL"], socketFactory: () => socket, persist: async () => undefined });
+    await manager.start(); socket.emit("message", Buffer.from(JSON.stringify([{ T: "success", msg: "authenticated" }])));
+    manager.replaceSymbols(["SPY", "QQQ", "MSFT"]);
+    expect(JSON.parse(socket.sent.at(-2)!)).toEqual({ action: "unsubscribe", bars: ["AAPL"], quotes: ["AAPL"] });
+    expect(JSON.parse(socket.sent.at(-1)!)).toEqual({ action: "subscribe", bars: ["MSFT"], quotes: ["MSFT"] });
+    manager.stop();
+  });
 });

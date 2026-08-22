@@ -16,6 +16,8 @@ export type AiCandidate = {
   indicators: Record<string, number>;
   marketRegime: string;
   botInstruction?: string | null;
+  /** Deterministic, source-free caution input generated before market open. */
+  dailyInput?: { executionPolicy: string; recommendations: string[]; citations: Array<{ category: string; hostname: string; hash: string }> } | null;
 };
 
 export type AiAdvisory = {
@@ -146,7 +148,8 @@ export class OpenAiAdvisor {
             deterministicReason: candidate.strategyReason,
             indicators: candidate.indicators,
             marketRegime: candidate.marketRegime,
-            botInstruction: candidate.botInstruction ?? null
+            botInstruction: candidate.botInstruction ?? null,
+            dailyInput: candidate.dailyInput ?? null
           }),
           max_output_tokens: 500,
           text: { format: { type: "json_schema", name: "braiker_trade_advisory", strict: true, schema: advisorySchema } }

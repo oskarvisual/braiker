@@ -29,6 +29,15 @@ describe("OpenAI trade advisor", () => {
     expect(JSON.parse(request.body)).toMatchObject({ model: "gpt-5.4-mini", store: false, text: { format: { type: "json_schema" } } });
   });
 
+  it("passes only structured daily caution context to the advisory", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ recommendation: "CAUTION", rationale: "Context is incomplete.", risks: [], evidence: [] }) }] }] }), { status: 200 }));
+    const advisor = new OpenAiAdvisor({ apiKey: "test-key", model: "gpt-5.4-mini", timeoutMs: 1_000, fetchImpl });
+    await advisor.analyze({ ...candidate, dailyInput: { executionPolicy: "May defer only", recommendations: ["Require confirmation"], citations: [{ category: "MACRO", hostname: "federalreserve.gov", hash: "a".repeat(64) }] } });
+    const [, request] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(request.body).input).toContain("dailyInput");
+    expect(JSON.parse(request.body).input).toContain("May defer only");
+  });
+
   it("fails closed for malformed model output and never converts a failed analysis into approval", async () => {
     const advisor = new OpenAiAdvisor({
       apiKey: "test-key",

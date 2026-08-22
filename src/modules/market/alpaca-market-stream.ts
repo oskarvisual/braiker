@@ -113,12 +113,14 @@ export class AlpacaMarketStreamManager {
   private reconnectAttempt = 0;
   private stopped = true;
   private authenticated = false;
+  private symbols: string[];
   private readonly socketFactory: (url: string) => StreamSocket | Promise<StreamSocket>;
   private readonly persist: (messages: ParsedMarketMessage[]) => Promise<void>;
   private readonly scheduleReconnect: (callback: () => void | Promise<void>, delayMs: number) => NodeJS.Timeout;
   private readonly clearReconnect: (timeout: NodeJS.Timeout) => void;
 
   constructor(private readonly dependencies: StreamDependencies) {
+    this.symbols = [...new Set(dependencies.symbols)];
     this.socketFactory = dependencies.socketFactory ?? defaultSocketFactory;
     this.persist = dependencies.persist ?? ((messages) => persistAlpacaMarketStreamMessages(messages, dependencies.feed));
     this.scheduleReconnect = dependencies.scheduleReconnect ?? ((callback, delayMs) => setTimeout(() => void callback(), delayMs));
@@ -138,6 +140,17 @@ export class AlpacaMarketStreamManager {
     this.reconnectTimer = null;
     this.socket?.close();
     this.socket = null;
+  }
+
+  /** Updates the shared stream from the union of enabled bot watchlists. */
+  replaceSymbols(nextSymbols: readonly string[]) {
+    const next = [...new Set(nextSymbols)];
+    const removed = this.symbols.filter((symbol) => !next.includes(symbol));
+    const added = next.filter((symbol) => !this.symbols.includes(symbol));
+    this.symbols = next;
+    if (!this.authenticated || !this.socket) return;
+    if (removed.length) this.socket.send(JSON.stringify({ action: "unsubscribe", bars: removed, quotes: removed }));
+    if (added.length) this.socket.send(JSON.stringify({ action: "subscribe", bars: added, quotes: added }));
   }
 
   /** Persisted separately so the web process can report stream freshness. */
@@ -171,7 +184,7 @@ export class AlpacaMarketStreamManager {
       if (message.type === "success" && message.message === "authenticated") {
         this.authenticated = true;
         this.reconnectAttempt = 0;
-        this.socket?.send(JSON.stringify({ action: "subscribe", bars: this.dependencies.symbols, quotes: this.dependencies.symbols }));
+        this.socket?.send(JSON.stringify({ action: "subscribe", bars: this.symbols, quotes: this.symbols }));
       }
       if (message.type === "error") logger.warn({ code: message.code, message: message.message }, "Alpaca market stream provider error");
     }

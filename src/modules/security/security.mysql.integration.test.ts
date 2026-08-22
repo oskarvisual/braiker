@@ -139,7 +139,8 @@ describeMysql("security financial transaction boundaries (MySQL)", () => {
         emailEnabled: true,
         emailRecipients: ["ops@example.test"],
         emailEvents: ["SYSTEM_STATUS_FAILURE"],
-        webhookEvents: []
+        webhookEvents: [],
+        telegramEvents: []
       }
     });
     const alert = await db!.notificationAlert.create({

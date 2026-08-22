@@ -11,11 +11,12 @@ describe("system status", () => {
       workerHeartbeat: async () => new Date("2026-08-21T11:59:20.000Z"),
       alpacaHealth: async () => ({ healthy: true }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:59:30.000Z"),
-      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: "ciphertext", emailEnabled: true }),
+      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: "ciphertext", emailEnabled: true, telegramEnabled: true, telegramReceiveMessages: true }),
+      telegramManagerSession: async () => ({ scope: "global" }),
       openAiQuotaAlert: async () => false,
       openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
       botCounts: async () => ({ on: 2, off: 1, dead: 1 }),
-      config: { aiEnabled: false, smtpConfigured: true }
+      config: { aiEnabled: false, smtpConfigured: true, telegramConfigured: true }
     });
 
     expect(status.services).toEqual(expect.arrayContaining([
@@ -26,7 +27,8 @@ describe("system status", () => {
       expect.objectContaining({ id: "market-stream", state: "healthy" }),
       expect.objectContaining({ id: "openai", state: "disabled" }),
       expect.objectContaining({ id: "smtp", state: "configured" }),
-      expect.objectContaining({ id: "webhook", state: "configured" })
+      expect.objectContaining({ id: "webhook", state: "configured" }),
+      expect.objectContaining({ id: "telegram", state: "configured" })
     ]));
     expect(status.services.find((service) => service.id === "openai")?.detail).toContain("advisory");
     expect(status.bots).toEqual({ on: 2, off: 1, dead: 1 });
@@ -40,11 +42,12 @@ describe("system status", () => {
       workerHeartbeat: async () => new Date("2026-08-21T11:55:00.000Z"),
       alpacaHealth: async () => ({ healthy: false }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:55:00.000Z"),
-      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: null, emailEnabled: false }),
+      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: null, emailEnabled: false, telegramEnabled: true, telegramReceiveMessages: false }),
+      telegramManagerSession: async () => null,
       openAiQuotaAlert: async () => false,
       openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
       botCounts: async () => ({ on: 0, off: 3, dead: 0 }),
-      config: { aiEnabled: true, smtpConfigured: false }
+      config: { aiEnabled: true, smtpConfigured: false, telegramConfigured: true }
     });
 
     expect(status.services).toEqual(expect.arrayContaining([
@@ -54,7 +57,8 @@ describe("system status", () => {
       expect.objectContaining({ id: "market-stream", state: "warning" }),
       expect.objectContaining({ id: "openai", state: "configured" }),
       expect.objectContaining({ id: "smtp", state: "disabled" }),
-      expect.objectContaining({ id: "webhook", state: "warning" })
+      expect.objectContaining({ id: "webhook", state: "warning" }),
+      expect.objectContaining({ id: "telegram", state: "warning" })
     ]));
     expect(status.services.find((service) => service.id === "openai")?.detail).toContain("only when a candidate requires review");
   });
@@ -67,10 +71,11 @@ describe("system status", () => {
       marketStreamHeartbeat: async () => now,
       alpacaHealth: async () => ({ healthy: true }),
       notificationSettings: async () => null,
+      telegramManagerSession: async () => null,
       openAiQuotaAlert: async () => true,
       openAiRuntimeState: async () => ({ status: "QUOTA_EXHAUSTED", disabledAt: now, lastCheckedAt: now }),
       botCounts: async () => ({ on: 1, off: 0, dead: 0 }),
-      config: { aiEnabled: true, smtpConfigured: false }
+      config: { aiEnabled: true, smtpConfigured: false, telegramConfigured: false }
     });
 
     expect(status.services.find((service) => service.id === "openai")).toMatchObject({

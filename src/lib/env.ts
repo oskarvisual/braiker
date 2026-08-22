@@ -11,6 +11,7 @@ const schema = z.object({
   AI_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   OPENAI_API_KEY: z.string().trim().default(""),
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-5.4-mini"),
+  BOT_MANAGER_CHAT_MODEL: z.string().trim().max(120).default(""),
   OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
   AI_MAX_ANALYSES_PER_BOT_PER_DAY: z.coerce.number().int().min(1).max(100).default(10),
   ALPACA_PAPER_BASE_URL: z.literal("https://paper-api.alpaca.markets"),
@@ -23,6 +24,7 @@ const schema = z.object({
   SMTP_USER: z.string().default(""),
   SMTP_PASSWORD: z.string().default(""),
   SMTP_FROM: z.string().default(""),
+  TELEGRAM_BOT_TOKEN: z.string().trim().default(""),
   METRICS_TOKEN: z.string().refine((value) => value === "" || value.length >= 32).default(""),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info")
 }).superRefine((value, context) => {

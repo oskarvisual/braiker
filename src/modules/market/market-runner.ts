@@ -17,6 +17,7 @@ import type { RiskPolicy } from "@/modules/risk/types";
 import { sizePosition } from "@/modules/strategy/position-sizing";
 import { evaluateTrendStrategy, type StrategyProfile } from "@/modules/strategy/trend-strategy";
 import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
+import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -31,7 +32,7 @@ function domainBar(bar: { symbol: string; timeframe: string; timestamp: Date; op
 async function activeBots() {
   return prisma.botInstance.findMany({
     where: { runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false },
-    include: { watchlist: { where: { enabled: true } }, botPositions: true }
+    include: { watchlist: { where: { enabled: true } }, botPositions: true, dailyInputs: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { content: true }, take: 1 } }
   });
 }
 
@@ -48,6 +49,20 @@ function strategyProfile(bot: ActiveBot): StrategyProfile {
 
 function riskPolicy(bot: ActiveBot): RiskPolicy {
   return bot.riskPolicy as unknown as RiskPolicy;
+}
+
+function safeDailyInput(bot: ActiveBot) {
+  const content = bot.dailyInputs[0]?.content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+  const value = content as { executionPolicy?: unknown; recommendations?: unknown; citations?: unknown };
+  if (typeof value.executionPolicy !== "string" || !Array.isArray(value.recommendations) || !Array.isArray(value.citations)) return null;
+  const recommendations = value.recommendations.filter((item): item is string => typeof item === "string").slice(0, 8);
+  const citations = value.citations.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const citation = item as { category?: unknown; hostname?: unknown; hash?: unknown };
+    return typeof citation.category === "string" && typeof citation.hostname === "string" && typeof citation.hash === "string" ? [{ category: citation.category, hostname: citation.hostname, hash: citation.hash }] : [];
+  }).slice(0, 20);
+  return { executionPolicy: value.executionPolicy.slice(0, 500), recommendations, citations };
 }
 
 async function persistBars(bars: PersistableMarketBar[]) {
@@ -113,7 +128,7 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
       indicators,
       market: { spyTrend: marketTrend(spyIndicators, spyClose), qqqTrend: marketTrend(qqqIndicators, qqqClose), regime },
       portfolio: { virtualCash: input.bot.currentCapital.toString(), reservedCapital: input.bot.reservedCapital.toString(), positions: input.bot.botPositions.map((item) => ({ symbol: item.symbol, quantity: item.quantity.toString(), averageEntryPrice: item.averageEntryPrice.toString() })) },
-      bot: { id: input.bot.id, templateId: input.bot.templateId, capitalAllocation: input.bot.currentCapital.toString() }
+      bot: { id: input.bot.id, templateId: input.bot.templateId, capitalAllocation: input.bot.currentCapital.toString(), dailyInput: safeDailyInput(input.bot) }
     };
     const snapshot = await prisma.marketSnapshot.create({ data: { botId: input.bot.id, symbol: input.symbol, payload: context as Prisma.InputJsonValue } });
     const signal = evaluateTrendStrategy({ symbol: input.symbol, timestamp: input.candle.timestamp, price: input.candle.close, indicators, market: context.market, hasPosition: Boolean(position), profile: strategyProfile(input.bot) });
@@ -148,7 +163,8 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
         strategyReason: signal.reason,
         indicators: aiIndicators,
         marketRegime: regime,
-        botInstruction: sanitizedBotInstruction(input.bot.strategyProfile)
+        botInstruction: sanitizedBotInstruction(input.bot.strategyProfile),
+        dailyInput: safeDailyInput(input.bot)
       }
     });
     if (aiReview.blocked) {

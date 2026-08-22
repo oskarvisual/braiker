@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { accountMenuItems, sidebarNavigationItems } from "./app-navigation-policy";
 
 describe("application navigation policy", () => {
-  it("keeps operational navigation in the sidebar and moves admin links to the account menu", () => {
+  it("keeps the admin-only Bot Manager in the sidebar and moves account administration to the account menu", () => {
     expect(sidebarNavigationItems("ADMIN")).toEqual([
       { href: "/", label: "Dashboard" },
       { href: "/activity", label: "History" },
+      { href: "/manager", label: "Bot Manager" },
+      { href: "/resources", label: "Resources" },
       { href: "/setup", label: "Bots" }
     ]);
     expect(accountMenuItems("ADMIN")).toEqual([

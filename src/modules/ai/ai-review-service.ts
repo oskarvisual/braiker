@@ -28,7 +28,8 @@ export async function reviewTradeCandidateWithAi(input: { botId: string; candida
     deterministicReason: input.candidate.strategyReason,
     indicators: input.candidate.indicators,
     marketRegime: input.candidate.marketRegime,
-    botInstruction: input.candidate.botInstruction ?? null
+    botInstruction: input.candidate.botInstruction ?? null,
+    dailyInput: input.candidate.dailyInput ?? null
   };
   try {
     const advisory = await new OpenAiAdvisor({ apiKey: runtime.OPENAI_API_KEY, model: runtime.OPENAI_MODEL, timeoutMs: runtime.OPENAI_TIMEOUT_MS }).analyze(input.candidate);

@@ -1,0 +1,12 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+type Message = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; content: string; createdAt: string };
+
+/** Contextual explanation only; controls remain in the normal bot UI. */
+export function BotChat({ botId, botName }: { botId: string; botName: string }) {
+  const [messages, setMessages] = useState<Message[]>([]); const [draft, setDraft] = useState(""); const [sending, setSending] = useState(false);
+  useEffect(() => { void fetch(`/api/bots/${botId}/chat`, { cache: "no-store" }).then(async (response) => response.ok ? response.json() as Promise<{ messages: Message[] }> : Promise.reject()).then((payload) => setMessages(payload.messages)).catch(() => undefined); }, [botId]);
+  async function submit(event: FormEvent) { event.preventDefault(); const content = draft.trim(); if (!content || sending) return; setDraft(""); setSending(true); setMessages((current) => [...current, { id: `local-${Date.now()}`, role: "USER", content, createdAt: new Date().toISOString() }]); try { const response = await fetch(`/api/bots/${botId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) }); const payload = await response.json() as { reply?: string }; if (!response.ok || !payload.reply) throw new Error(); setMessages((current) => [...current, { id: `reply-${Date.now()}`, role: "ASSISTANT", content: payload.reply!, createdAt: new Date().toISOString() }]); } finally { setSending(false); } }
+  return <section className="managerChat"><header className="managerChatHeading"><div><p className="eyebrow">PRIVATE BOT CONTEXT</p><h1>{botName}</h1><p className="intro">Ask why this bot analyzed, rejected, or traded an opportunity. This chat cannot alter the bot, its capital, risk, instructions, or orders.</p></div></header><section className="managerConversation"><div className="managerMessages">{messages.map((message) => <article key={message.id} className={`managerMessage ${message.role.toLowerCase()}`}><small>{message.role === "USER" ? "You" : botName}</small><p>{message.content}</p></article>)}</div><form className="managerComposer" onSubmit={submit}><label htmlFor="bot-chat-message">Ask {botName}</label><div><textarea id="bot-chat-message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} disabled={sending} /><button type="submit" disabled={sending || !draft.trim()}>{sending ? "Thinking…" : "Send"}</button></div></form></section></section>;
+}
