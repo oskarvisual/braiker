@@ -127,7 +127,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
     </header>
     <div className="managerChatLayout">
       <aside className="managerChatSidebar" aria-label="Bot Manager conversations">
-        <div className="managerChatSidebarTitle"><strong>Conversations</strong><span>Proposals require confirmation</span></div>
+        <div className="managerChatSidebarTitle"><strong>Conversations</strong></div>
         <div className="managerSessionList">
           {sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => setSelectedId(session.id)}>
             <strong>{session.pinned ? "📌 " : ""}{session.title}</strong><small>{session.kind === "OPERATIONS" ? "Telegram alerts and operations" : "Manual conversation"}</small>

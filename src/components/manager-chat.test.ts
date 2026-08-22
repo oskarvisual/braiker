@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { managerActionSummary, synchronizeManagerSessions, type ManagerSession } from "@/components/manager-chat";
 
 const operationsSession: ManagerSession = {
@@ -42,5 +44,10 @@ describe("synchronizeManagerSessions", () => {
   it("renders the paper-only impact of a pending Manager power proposal", () => {
     expect(managerActionSummary({ id: "proposal-1", botName: "Juan trAIder", action: "TURN_ON", expiresAt: "2026-08-22T15:10:00.000Z" }))
       .toContain("turn ON Juan trAIder");
+  });
+
+  it("does not repeat proposal-confirmation policy in the conversation sidebar", () => {
+    expect(readFileSync(resolve(process.cwd(), "src/components/manager-chat.tsx"), "utf8"))
+      .not.toContain("Proposals require confirmation");
   });
 });
