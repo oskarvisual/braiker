@@ -104,4 +104,12 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .notificationChannelContent .eventOptions > label { min-height:0; padding:11px 12px; }
 .macroCalendarPanel { margin-top:18px; padding:24px; }
 .macroCalendarPanel .settingsControl { gap:14px; margin-top:18px; }
+
+/* Both manager and local-bot chats use the same balanced conversation geometry. */
+.managerMessages { align-content:stretch; }
+.managerEmpty { justify-self:center; align-self:center; width:min(100%,560px); margin:auto; }
+.managerComposer > div { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:stretch; gap:12px; }
+.managerComposer textarea { min-height:92px; }
+.managerComposer button { align-self:stretch; min-width:118px; min-height:92px; display:grid; place-items:center; }
+@media (max-width:800px) { .managerComposer > div { grid-template-columns:1fr; }.managerComposer button { width:100%; min-height:48px; } }
 .assetUniversePanel { margin-top:18px; }.assetUniversePanel .panelHeading { align-items:flex-start; }.assetUniversePanel .panelHeading > div { max-width:850px; }.assetSearch { display:grid; gap:7px; max-width:560px; margin-top:18px; color:var(--muted); font-size:.78rem; font-weight:800; }.assetSearch input { width:100%; min-height:44px; border:1px solid #40556c; border-radius:9px; background:#0a121b; color:var(--text); padding:10px 12px; font:inherit; }.assetUniverseNotice { margin:14px 0 0; }.assetUniverseList { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:460px; margin-top:14px; overflow:auto; padding-right:4px; }.assetUniverseList label { display:flex; gap:10px; align-items:flex-start; padding:11px; border:1px solid #263748; border-radius:9px; background:#0d1620; cursor:pointer; }.assetUniverseList input { width:17px; height:17px; margin:2px 0 0; accent-color:var(--green); }.assetUniverseList strong,.assetUniverseList small { display:block; }.assetUniverseList small { margin-top:3px; color:var(--muted); font-size:.72rem; line-height:1.3; } @media (max-width:800px) { .assetUniversePanel .panelHeading { display:grid; gap:14px; }.assetUniversePanel .panelHeading button,.assetUniverseList { width:100%; }.assetUniverseList { grid-template-columns:1fr; } }
