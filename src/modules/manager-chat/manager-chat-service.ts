@@ -3,12 +3,13 @@ import { disableAiRuntimeForQuota, getAiRuntimeState } from "@/modules/ai/ai-run
 import { managerUnavailableReply, sanitizeManagerMessage } from "./manager-chat";
 import type { ManagerChatHistoryItem, ManagerChatRequest } from "./openai-manager-chat";
 import { prepareManagerPowerProposal } from "./manager-power-intents";
+import { createManagerBotChatNote } from "@/modules/bot-chat/bot-chat-service";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "managerActionProposal">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
@@ -133,6 +134,22 @@ async function storeAssistantReply(sessionId: string, content: string, db: Manag
   return db.managerChatMessage.create({ data: { sessionId, ...(sourceReference ? { sourceReference } : {}), role: "ASSISTANT", source: "SYSTEM", content: sanitizeManagerMessage(content) } });
 }
 
+function normalizedBotName(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+async function prepareManagerBotNote(input: { userId: string; content: string }, db: ManagerChatDb) {
+  const match = /^(?:note\s+for|nota\s+para)\s+(.+?)\s*:\s*(.+)$/i.exec(input.content.trim());
+  if (!match) return null;
+  const reference = match[1]!.trim().replace(/^(?:the\s+)?bot\s+/i, "");
+  const content = match[2]!.trim();
+  const bots = await db.botInstance.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" }, take: 100 });
+  const bot = bots.find((candidate) => normalizedBotName(candidate.name) === normalizedBotName(reference));
+  if (!bot) return { reply: `I could not find an exact bot named “${reference}”. No daily note was created.` };
+  await createManagerBotChatNote({ userId: input.userId, botId: bot.id, content, title: "Bot Manager daily note" }, db);
+  return { reply: `Created a local bot-chat session for ${bot.name} and added the note as cautious context for today only. It cannot create orders, change capital, risk, instructions, Kill Switch, or bot power.` };
+}
+
 /**
  * Stores a user message then produces a read-only response. Provider failures
  * cannot affect worker execution, risk, bot power, capital, or Kill Switches.
@@ -176,6 +193,11 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
         };
       }
       return { reply: power.reply, available: true };
+    }
+    const note = await prepareManagerBotNote({ userId: input.userId, content }, dependencies.db);
+    if (note) {
+      await storeAssistantReply(session.id, note.reply, dependencies.db, replyReference);
+      return { reply: note.reply, available: true };
     }
   }
 

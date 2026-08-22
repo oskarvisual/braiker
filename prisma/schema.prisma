@@ -57,6 +57,20 @@ enum ManagerChatMessageSource {
   SYSTEM
 }
 
+/// Individual bot conversations are local to the web application. A Manager
+/// note is visible in the recipient's bot-chat history, never in Telegram.
+enum BotChatSessionKind {
+  CONVERSATION
+  MANAGER_NOTE
+}
+
+/// Day-scoped context is advisory-only. It can add caution to AI review but
+/// can never become an instruction, a signal, or an execution authority.
+enum BotDailyContextSource {
+  USER_CHAT
+  MANAGER_NOTE
+}
+
 /// A proposed management change is separate from a conversational reply.
 /// Only the small allowlist below may be executed after a human confirmation.
 enum ManagerActionKind {
@@ -126,6 +140,7 @@ model User {
   telegramPairingCodes TelegramPairingCode[]
   managerChatSessions ManagerChatSession[]
   botChatSessions BotChatSession[]
+  botDailyContexts BotDailyContext[]
   managerActionProposals ManagerActionProposal[]
   resourceSources ResourceSource[]
 }
@@ -325,6 +340,7 @@ model BotInstance {
   managerActionProposals ManagerActionProposal[]
   botChatSessions BotChatSession[]
   dailyInputs    DailyBotInput[]
+  dailyContexts  BotDailyContext[]
   @@index([walletId, status])
   @@index([cloneSourceId])
 }
@@ -836,19 +852,21 @@ model ManagerActionProposal {
   @@index([botId, createdAt])
 }
 
-/// Private explanation transcript for one user and one bot. It is not a
-/// command channel and is intentionally isolated from Manager conversations.
+/// Private, local explanation sessions. They are never delivered to Telegram
+/// and cannot mutate the bot or create an order.
 model BotChatSession {
-  id        String           @id @default(uuid()) @db.Char(36)
-  userId    String           @db.Char(36)
-  botId     String           @db.Char(36)
-  createdAt DateTime         @default(now()) @db.DateTime(3)
-  updatedAt DateTime         @updatedAt @db.DateTime(3)
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bot       BotInstance      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  id        String             @id @default(uuid()) @db.Char(36)
+  userId    String             @db.Char(36)
+  botId     String             @db.Char(36)
+  kind      BotChatSessionKind @default(CONVERSATION)
+  title     String             @default("New conversation") @db.VarChar(120)
+  createdAt DateTime           @default(now()) @db.DateTime(3)
+  updatedAt DateTime           @updatedAt @db.DateTime(3)
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bot       BotInstance        @relation(fields: [botId], references: [id], onDelete: Cascade)
   messages  BotChatMessage[]
-  @@unique([botId, userId])
   @@index([userId, updatedAt])
+  @@index([botId, userId, updatedAt])
 }
 
 model BotChatMessage {
@@ -858,7 +876,26 @@ model BotChatMessage {
   content   String                 @db.Text
   createdAt DateTime               @default(now()) @db.DateTime(3)
   session   BotChatSession         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  dailyContext BotDailyContext?
   @@index([sessionId, createdAt])
+}
+
+/// An auditable, bounded message selected for the current NY market day.
+/// This is intentionally separate from the immutable resource briefing.
+model BotDailyContext {
+  id        String                @id @default(uuid()) @db.Char(36)
+  botId     String                @db.Char(36)
+  userId    String                @db.Char(36)
+  messageId String                @unique @db.Char(36)
+  marketDate DateTime             @db.Date
+  source    BotDailyContextSource
+  content   String                @db.Text
+  createdAt DateTime              @default(now()) @db.DateTime(3)
+  bot       BotInstance           @relation(fields: [botId], references: [id], onDelete: Cascade)
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   BotChatMessage        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  @@index([botId, marketDate])
+  @@index([userId, marketDate])
 }
 
 /// Read-only Bot Manager conversation history; pairing secrets are redacted.

@@ -9,5 +9,6 @@ export default async function BotDetailPage({ params }: { params: Promise<{ botI
   if (!user) redirect("/login");
   const bot = await prisma.botInstance.findUnique({ where: { id: route.botId }, include: { wallet: { include: { members: { where: { userId: user.id }, select: { userId: true } } } } } });
   if (!bot || (user.role !== "ADMIN" && bot.wallet.members.length === 0)) redirect("/setup");
-  return <><AppNavigation user={{ email: user.email, role: user.role }} /><main className="shell appContent"><BotChat botId={bot.id} botName={bot.name} /></main></>;
+  const chatActive = bot.runMode === "PAPER_ACTIVE" && bot.lifeStatus === "ACTIVE" && bot.status === "RUNNING" && !bot.killSwitch;
+  return <><AppNavigation user={{ email: user.email, role: user.role }} /><main className="shell appContent"><BotChat botId={bot.id} botName={bot.name} active={chatActive} /></main></>;
 }

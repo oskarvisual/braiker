@@ -72,6 +72,29 @@ describe("Bot Manager chat service", () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ botId: "bot-1", action: "TURN_ON" }) }));
   });
 
+  it("creates a local visible bot-note session from either Manager channel without calling the model", async () => {
+    const responder = { reply: vi.fn() };
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "operations" }) },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}) },
+      botInstance: {
+        findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Juan trAIder" }]),
+        findUnique: vi.fn().mockResolvedValue({ id: "bot-1", runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false })
+      },
+      managerActionProposal: { create: vi.fn() },
+      botChatSession: { create: vi.fn().mockResolvedValue({ id: "note-session" }) },
+      botChatMessage: { create: vi.fn().mockResolvedValue({ id: "note-message" }) },
+      botDailyContext: { create: vi.fn() }
+    };
+
+    const result = await sendManagerMessage({ userId: "11111111-1111-4111-8111-111111111111", sessionId: "operations", content: "Note for Juan trAIder: avoid new QQQ exposure before CPI", actorRole: "ADMIN", requestedVia: "TELEGRAM" }, { db: db as never, responder, aiEnabled: false });
+
+    expect(result.reply).toContain("local bot-chat session");
+    expect(responder.reply).not.toHaveBeenCalled();
+    expect(db.botChatSession.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ botId: "bot-1", kind: "MANAGER_NOTE" }) }));
+    expect(db.botDailyContext.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ source: "MANAGER_NOTE" }) }));
+  });
+
   it("does not call the provider while the global AI circuit is quota-disabled", async () => {
     const responder = { reply: vi.fn() };
     const db = {

@@ -19,6 +19,7 @@ import { evaluateTrendStrategy, type StrategyProfile } from "@/modules/strategy/
 import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { activeMacroGuard } from "@/modules/resources/macro-guard";
+import { appendCautiousDailyContext } from "@/modules/bot-chat/daily-chat-context";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -33,7 +34,7 @@ function domainBar(bar: { symbol: string; timeframe: string; timestamp: Date; op
 async function activeBots() {
   return prisma.botInstance.findMany({
     where: { runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false },
-    include: { watchlist: { where: { enabled: true } }, botPositions: true, dailyInputs: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { content: true }, take: 1 } }
+    include: { watchlist: { where: { enabled: true } }, botPositions: true, dailyInputs: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { content: true }, take: 1 }, dailyContexts: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { source: true, content: true }, orderBy: { createdAt: "asc" }, take: 12 } }
   });
 }
 
@@ -63,7 +64,7 @@ function safeDailyInput(bot: ActiveBot) {
     const citation = item as { category?: unknown; hostname?: unknown; hash?: unknown };
     return typeof citation.category === "string" && typeof citation.hostname === "string" && typeof citation.hash === "string" ? [{ category: citation.category, hostname: citation.hostname, hash: citation.hash }] : [];
   }).slice(0, 20);
-  return { executionPolicy: value.executionPolicy.slice(0, 500), recommendations, citations };
+  return appendCautiousDailyContext({ executionPolicy: value.executionPolicy.slice(0, 500), recommendations, citations }, bot.dailyContexts);
 }
 
 async function persistBars(bars: PersistableMarketBar[]) {
