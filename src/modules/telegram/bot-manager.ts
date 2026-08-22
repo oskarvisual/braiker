@@ -9,6 +9,10 @@ import { confirmManagerActionProposal, createManagerActionProposal, hashManagerC
 const SCOPE = "global";
 const PAIRING_TTL_MS = 10 * 60_000;
 
+function afterInboundMessage(now: Date) {
+  return new Date(now.getTime() + 1);
+}
+
 export type TelegramUpdate = { updateId: string; chatId?: string; text?: string };
 export type TelegramApi = { getUpdates(offset?: string): Promise<TelegramUpdate[]>; sendMessage(chatId: string, text: string): Promise<void> };
 
@@ -128,7 +132,7 @@ async function processUpdate(
       await db.telegramManagerSession.upsert({ where: { scope: SCOPE }, create: { scope: SCOPE, telegramChatId: update.chatId, userId: pairing.userId, linkedAt: now, lastReceivedAt: now }, update: { telegramChatId: update.chatId, userId: pairing.userId, linkedAt: now, lastReceivedAt: now } });
       await ensureOperationsSession(pairing.userId, db);
       await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, telegramUpdateId: update.updateId, direction: "INBOUND", content: redactTelegramInboundContent(update.text), createdAt: now } });
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: "Bot Manager paired. Use /help for read-only commands.", createdAt: now } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: "Bot Manager paired. Use /help for read-only commands.", createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, "Bot Manager paired. Use /help for read-only commands.");
       return true;
     }
@@ -146,12 +150,12 @@ async function processUpdate(
       if (!proposal) throw new Error("MANAGER_ACTION_CONFIRMATION_INVALID");
       const bot = await confirmManagerActionProposal({ proposalId: proposal.id, actorId: session.user.id, actorRole: session.user.role, channel: "TELEGRAM", confirmationCode, now }, { db });
       const reply = `Confirmed. ${bot.id} is now ${bot.runMode === "PAPER_ACTIVE" ? "ON" : "OFF"}.`;
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: now } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     } catch {
       const reply = "That confirmation is invalid, expired, already used, or the requested change is no longer safe to apply.";
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: now } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     }
@@ -161,12 +165,12 @@ async function processUpdate(
     try {
       const proposal = await createManagerActionProposal({ userId: session.user.id, actorRole: session.user.role, botId: control.botId, action: control.action, requestedVia: "TELEGRAM", now }, db);
       const reply = `Proposal prepared: ${control.action === "TURN_ON" ? "turn ON" : "turn OFF"} bot ${control.botId}. Send CONFIRMAR ${proposal.confirmationCode} before ${proposal.expiresAt.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" })} ET.`;
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: redactTelegramInboundContent(reply), createdAt: now } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: redactTelegramInboundContent(reply), createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     } catch {
       const reply = "I could not prepare that change. Only the paired Admin may propose one valid bot control at a time.";
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: now } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     }
@@ -179,7 +183,7 @@ async function processUpdate(
     source: "TELEGRAM",
     sourceReference: `telegram:${update.updateId}`
   }, { db, responder: manager.responder, aiEnabled: manager.aiEnabled })).reply;
-  await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: now } });
+  await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
   await api.sendMessage(update.chatId, reply);
   return true;
 }

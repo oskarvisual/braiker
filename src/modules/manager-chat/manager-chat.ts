@@ -32,6 +32,6 @@ export function buildManagerInstructions(context: Record<string, unknown>) {
 
 export function managerUnavailableReply(reason: ManagerUnavailableReason) {
   if (reason === "QUOTA_EXHAUSTED") return "AI advisory is paused because the provider reported a quota or billing limit. No trading controls changed.";
-  if (reason === "DISABLED") return "AI advisory is not enabled. No trading controls changed.";
+  if (reason === "DISABLED") return "AI advisory is paused because it is not enabled. No trading controls changed.";
   return "Bot Manager is temporarily unavailable. No trading controls changed.";
 }

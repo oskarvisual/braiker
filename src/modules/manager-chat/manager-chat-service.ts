@@ -48,11 +48,21 @@ function decimalString(value: { toString(): string } | null | undefined) {
 
 /** The pinned Operations transcript is deterministic and shared by web alerts and Telegram. */
 export async function ensureOperationsSession(userId: string, db: ManagerSessionDb) {
-  return db.managerChatSession.upsert({
-    where: { externalKey: operationsSessionKey(userId) },
-    create: { userId, kind: "OPERATIONS", title: "Bot Manager · Operations", pinned: true, externalKey: operationsSessionKey(userId) },
-    update: { pinned: true, title: "Bot Manager · Operations" }
-  });
+  const externalKey = operationsSessionKey(userId);
+  try {
+    return await db.managerChatSession.upsert({
+      where: { externalKey },
+      create: { userId, kind: "OPERATIONS", title: "Bot Manager · Operations", pinned: true, externalKey },
+      update: { pinned: true, title: "Bot Manager · Operations" }
+    });
+  } catch (error) {
+    // Prisma can implement an upsert as select/insert on MySQL. Two alert
+    // deliveries for a new user may therefore race for this unique key.
+    if (!error || typeof error !== "object" || (error as { code?: unknown }).code !== "P2002") throw error;
+    const existing = await db.managerChatSession.findUnique({ where: { externalKey } });
+    if (existing) return existing;
+    throw error;
+  }
 }
 
 /** Alert retries are deliberately collapsed by the original alert id. */

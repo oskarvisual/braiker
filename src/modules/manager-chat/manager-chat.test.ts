@@ -13,6 +13,7 @@ describe("Bot Manager chat policy", () => {
 
   it("returns an honest local reply when AI is unavailable instead of inventing an action", () => {
     expect(managerUnavailableReply("QUOTA_EXHAUSTED")).toContain("paused");
+    expect(managerUnavailableReply("DISABLED")).toContain("paused");
     expect(managerUnavailableReply("DISABLED")).toContain("not enabled");
   });
 

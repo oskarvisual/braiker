@@ -16,6 +16,16 @@ describe("Bot Manager chat service", () => {
     }));
   });
 
+  it("recovers the existing Operations session when concurrent creation loses the unique-key race", async () => {
+    const existing = { id: "operations-existing", title: "Bot Manager · Operations", pinned: true };
+    const upsert = vi.fn().mockRejectedValue({ code: "P2002" });
+    const findUnique = vi.fn().mockResolvedValue(existing);
+    const db = { managerChatSession: { upsert, findUnique } } as never;
+
+    await expect(ensureOperationsSession("11111111-1111-4111-8111-111111111111", db)).resolves.toEqual(existing);
+    expect(findUnique).toHaveBeenCalledWith({ where: { externalKey: "operations:11111111-1111-4111-8111-111111111111" } });
+  });
+
   it("creates ordinary sessions unpinned and trims their title", async () => {
     const create = vi.fn().mockResolvedValue({ id: "manual" });
     const db = { managerChatSession: { create } } as never;
