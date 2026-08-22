@@ -101,7 +101,7 @@ export async function sendBotChatMessage(input: { userId: string; botId: string;
     await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "ASSISTANT", content: reply } });
     return { reply, available: false, addedToDailyContext: Boolean(dailyContent) };
   }
-  const history = await dependencies.db.botChatMessage.findMany({ where: { sessionId: session.id, role: { in: ["USER", "ASSISTANT"] } }, select: { role: true, content: true }, orderBy: { createdAt: "desc" }, take: 12 });
+  const history = await dependencies.db.botChatMessage.findMany({ where: { sessionId: session.id, role: { in: ["USER", "ASSISTANT"] }, id: { not: message.id } }, select: { role: true, content: true }, orderBy: { createdAt: "desc" }, take: 11 });
   try {
     const reply = sanitizeManagerMessage(await dependencies.responder.reply({ message: content, history: history.reverse().map((item) => ({ role: item.role === "USER" ? "user" as const : "assistant" as const, content: item.content })), context: await botContext(input.botId, dependencies.db, input.focus) }));
     await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "ASSISTANT", content: reply } });

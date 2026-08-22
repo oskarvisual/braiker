@@ -31,7 +31,7 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
     const sessions = await prisma.botChatSession.findMany({ where: { userId: user.id, botId }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, kind: true, createdAt: true, updatedAt: true } });
     const requestedSessionId = new URL(request.url).searchParams.get("sessionId");
     const selectedSession = sessions.find((session) => session.id === requestedSessionId) ?? sessions[0] ?? null;
-    const messages = selectedSession ? await prisma.botChatMessage.findMany({ where: { sessionId: selectedSession.id }, orderBy: { createdAt: "asc" }, take: 100 }) : [];
+    const messages = selectedSession ? (await prisma.botChatMessage.findMany({ where: { sessionId: selectedSession.id }, orderBy: { createdAt: "desc" }, take: 100 })).reverse() : [];
     const active = isBotChatAvailable(bot);
     return NextResponse.json({ active, sessions: sessions.map((session) => ({ ...session, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() })), selectedSessionId: selectedSession?.id ?? null, messages: messages.map((message) => ({ id: message.id, role: message.role, content: message.content, createdAt: message.createdAt.toISOString() })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

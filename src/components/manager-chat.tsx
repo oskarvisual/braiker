@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
 import { useToast } from "@/components/toast";
 
 export type ManagerMessage = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; source: "WEB" | "TELEGRAM" | "TELEGRAM_ALERT" | "SYSTEM"; content: string; createdAt: string };
@@ -35,6 +36,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
   const [sending, setSending] = useState(false);
   const [actionProposals, setActionProposals] = useState(initialActionProposals);
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null, [sessions, selectedId]);
+  const composerRef = useAutoResizingComposer(draft);
 
   const refreshSessions = useCallback(async () => {
     const response = await fetch("/api/manager/sessions", {
@@ -143,7 +145,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
           {actionProposals.map((actionProposal) => <aside className="managerActionProposal" aria-live="polite" key={actionProposal.id}><p className="eyebrow">PENDING POWER CHANGE</p><strong>{actionProposal.action === "TURN_ON" ? "Turn ON" : "Turn OFF"} · {actionProposal.botName}</strong><p>{managerActionSummary(actionProposal)}</p><div><small>Expires {new Date(actionProposal.expiresAt).toLocaleTimeString()}</small><button type="button" onClick={() => void confirmAction(actionProposal)}>Confirm change</button></div></aside>)}
           <form className="managerComposer" onSubmit={sendMessage}>
             <label htmlFor="manager-message">Message BrAIker</label>
-            <div><textarea id="manager-message" value={draft} maxLength={4000} onChange={(event) => setDraft(event.target.value)} placeholder="Why did the latest scan skip a trade?" disabled={sending} /><button type="submit" disabled={sending || !draft.trim()}>{sending ? "Thinking…" : "Send"}</button></div>
+            <div><textarea ref={composerRef} id="manager-message" rows={1} value={draft} maxLength={4000} onChange={(event) => setDraft(event.target.value)} placeholder="Why did the latest scan skip a trade?" disabled={sending} /><button type="submit" disabled={sending || !draft.trim()}>{sending ? "Thinking…" : "Send"}</button></div>
             <small>BrAIker can explain information and prepare explicit ON/OFF proposals. It cannot trade, alter capital, risk limits, users, secrets, or settings from chat.</small>
           </form>
         </> : <div className="managerEmpty"><strong>No conversations yet.</strong></div>}

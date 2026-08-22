@@ -40,6 +40,7 @@ describe("isolated bot chats", () => {
     expect(result.addedToDailyContext).toBe(true);
     expect(responder.reply).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ bot: expect.objectContaining({ name: "Juan" }) }) }));
     expect(db.botChatMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ role: "USER" }) }));
+    expect(db.botChatMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { not: "message-1" } }), take: 11 }));
     expect(db.botDailyContext.create).toHaveBeenCalledWith({ data: expect.objectContaining({ botId: "bot-1", userId: "user-1", messageId: "message-1", source: "USER_CHAT" }) });
   });
 

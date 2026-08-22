@@ -39,11 +39,12 @@ export async function createManagerConversation(userId: string, title: string, d
 /** Returns only this user's sessions and bounded recent messages for the dashboard. */
 export async function listManagerConversations(userId: string, db: ManagerSessionDb) {
   await ensureOperationsSession(userId, db);
-  return db.managerChatSession.findMany({
+  const sessions = await db.managerChatSession.findMany({
     where: { userId },
     orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
-    include: { messages: { orderBy: { createdAt: "asc" }, take: 100 } }
+    include: { messages: { orderBy: { createdAt: "desc" }, take: 100 } }
   });
+  return sessions.map((session) => ({ ...session, messages: [...session.messages].reverse() }));
 }
 
 function decimalString(value: { toString(): string } | null | undefined) {
@@ -161,19 +162,20 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
   const content = sanitizeManagerMessage(input.content);
   if (!content) throw new Error("MANAGER_MESSAGE_EMPTY");
   const replyReference = input.sourceReference ? `reply:${input.sourceReference}` : undefined;
-  let priorUserMessage = false;
+  let currentMessageId: string | undefined;
   if (input.sourceReference) {
     const priorMessage = await dependencies.db.managerChatMessage.findUnique({ where: { sourceReference: input.sourceReference }, select: { id: true } });
     if (priorMessage) {
-      priorUserMessage = true;
+      currentMessageId = priorMessage.id;
       const priorReply = await dependencies.db.managerChatMessage.findUnique({ where: { sourceReference: replyReference! }, select: { content: true } });
       if (priorReply) return { reply: priorReply.content, available: true };
     }
   }
-  if (!priorUserMessage) {
-    await dependencies.db.managerChatMessage.create({
+  if (!currentMessageId) {
+    const message = await dependencies.db.managerChatMessage.create({
       data: { sessionId: session.id, sourceReference: input.sourceReference, role: "USER", source: input.source ?? "WEB", content }
     });
+    currentMessageId = message.id;
   }
 
   if (input.actorRole && input.requestedVia) {
@@ -214,10 +216,10 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
   }
 
   const historyRows = await dependencies.db.managerChatMessage.findMany({
-    where: { sessionId: session.id, role: { in: ["USER", "ASSISTANT"] } },
+    where: { sessionId: session.id, role: { in: ["USER", "ASSISTANT"] }, ...(currentMessageId ? { id: { not: currentMessageId } } : {}) },
     select: { role: true, content: true },
     orderBy: { createdAt: "desc" },
-    take: 12
+    take: 11
   });
   const history: ManagerChatHistoryItem[] = historyRows.reverse().map((row) => ({ role: row.role === "USER" ? "user" : "assistant", content: row.content }));
 

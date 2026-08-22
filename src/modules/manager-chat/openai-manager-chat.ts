@@ -48,7 +48,7 @@ export class OpenAiManagerChat {
           store: false,
           instructions: buildManagerInstructions(request.context),
           input: [
-            ...request.history.slice(-12).map((item) => ({ role: item.role, content: sanitizeManagerMessage(item.content) })),
+            ...request.history.slice(-11).map((item) => ({ role: item.role, content: sanitizeManagerMessage(item.content) })),
             { role: "user", content: sanitizeManagerMessage(request.message) }
           ],
           max_output_tokens: 600

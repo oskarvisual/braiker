@@ -24,4 +24,17 @@ describe("OpenAiManagerChat", () => {
 
     await expect(chat.reply({ message: "hello", context: {}, history: [] })).rejects.toThrow("OPENAI_QUOTA_EXHAUSTED");
   });
+
+  it("keeps the provider conversation window to eleven prior messages plus the current question", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "completed", output: [{ content: [{ type: "output_text", text: "Answer" }] }] }), { status: 200 }));
+    const chat = new OpenAiManagerChat({ apiKey: "test-api-key", model: "gpt-5-mini", timeoutMs: 1_000, fetchImpl });
+    const history = Array.from({ length: 15 }, (_, index) => ({ role: "user" as const, content: `Earlier ${index}` }));
+
+    await chat.reply({ message: "Current", context: {}, history });
+
+    const input = JSON.parse(fetchImpl.mock.calls[0][1].body).input;
+    expect(input).toHaveLength(12);
+    expect(input.at(-1)).toEqual({ role: "user", content: "Current" });
+    expect(input[0]).toEqual({ role: "user", content: "Earlier 4" });
+  });
 });

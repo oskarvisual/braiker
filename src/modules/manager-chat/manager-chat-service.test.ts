@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { appendManagerAlert, createManagerConversation, ensureOperationsSession, sendManagerMessage } from "./manager-chat-service";
+import { appendManagerAlert, createManagerConversation, ensureOperationsSession, listManagerConversations, sendManagerMessage } from "./manager-chat-service";
 
 describe("Bot Manager chat service", () => {
   it("creates exactly one pinned Operations session for a user", async () => {
@@ -31,6 +31,16 @@ describe("Bot Manager chat service", () => {
     const db = { managerChatSession: { create } } as never;
     await createManagerConversation("11111111-1111-4111-8111-111111111111", "  Research plan  ", db);
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "CONVERSATION", pinned: false, title: "Research plan" }) });
+  });
+
+  it("returns the newest display window in chronological order", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: "session-1", messages: [{ id: "new", createdAt: new Date("2026-08-22T15:01:00.000Z") }, { id: "old", createdAt: new Date("2026-08-22T15:00:00.000Z") }] }]);
+    const db = { managerChatSession: { upsert: vi.fn().mockResolvedValue({ id: "operations" }), findMany } } as never;
+
+    const sessions = await listManagerConversations("user-1", db);
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ include: { messages: { orderBy: { createdAt: "desc" }, take: 100 } } }));
+    expect(sessions[0]?.messages.map((message) => message.id)).toEqual(["old", "new"]);
   });
 
   it("stores a redacted alert once, even when alert delivery retries", async () => {
@@ -164,5 +174,24 @@ describe("Bot Manager chat service", () => {
     expect(responder.reply).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ role: "ASSISTANT", sourceReference: "reply:telegram:retry-after-provider-failure" }) }));
+  });
+
+  it("sends only prior messages to the provider history because the current message is supplied separately", async () => {
+    const create = vi.fn().mockResolvedValueOnce({ id: "current-message" }).mockResolvedValue({});
+    const findMany = vi.fn().mockResolvedValue([{ role: "USER", content: "Earlier question" }]);
+    const responder = { reply: vi.fn().mockResolvedValue("Answer") };
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "conversation" }) },
+      managerChatMessage: { create, findMany },
+      aiRuntimeState: { findUnique: vi.fn().mockResolvedValue({ status: "ACTIVE", disabledAt: null, lastCheckedAt: new Date() }) },
+      botInstance: { findMany: vi.fn().mockResolvedValue([]) },
+      botScanRun: { findMany: vi.fn() },
+      tradeProposal: { groupBy: vi.fn() }
+    } as never;
+
+    await sendManagerMessage({ userId: "user-1", sessionId: "conversation", content: "Current question" }, { db, responder, aiEnabled: true });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { not: "current-message" } }), take: 11 }));
+    expect(responder.reply).toHaveBeenCalledWith(expect.objectContaining({ message: "Current question", history: [{ role: "user", content: "Earlier question" }] }));
   });
 });
