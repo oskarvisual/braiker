@@ -94,6 +94,10 @@ The bot modal is a three-step wizard. Navigation is non-persistent: it must neve
 - A candidate not vetoed by AI goes through the existing risk engine, then an idempotent execution job. `client_order_id` is recovered from Alpaca before a retry submits an order.
 - Reconciliation records broker snapshots and terminal fills. Virtual cash, reservations, and `BotPosition` are attributed to exactly one bot; a zero-cash bot with no remaining position becomes permanently `DEAD`, is switched OFF, and retains its trace.
 
+### Survival reading
+
+The per-bot History modal presents the existing deterministic survival state as a read-only health card. `THRIVING`, `STABLE`, `CAUTIOUS`, `STRESSED`, `CRITICAL`, `DEAD`, and `CALIBRATING` retain their current backend meaning; the visual score (`100`, `75`, `60`, `40`, `15`, `0`, or unscored while calibrating) is only an ordinal rendering of those existing bands. It does not calculate P&L, modify risk, override the Kill Switch, or make an OFF bot permanently dead. A live bot with a reversible Kill Switch is shown as **Trading paused** while keeping its health reading; `DEAD` alone means trading stopped permanently. Capital that is deployed in an open position or reserved for an order continues to map to `STABLE`, because there is not yet a per-bot marked-to-market valuation or survival-history series. The UI therefore does not claim an improving/declining trend.
+
 The design intent is survival, not maximum activity: no strategy, prompt, or profile can bypass risk, capital isolation, the kill switch, or permanent death semantics.
 
 ## What is deliberately not finished

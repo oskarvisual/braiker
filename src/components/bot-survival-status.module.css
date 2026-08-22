@@ -6,23 +6,68 @@
 }
 
 .full {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(154px, .62fr) minmax(220px, 1fr);
+  gap: 20px;
+  align-items: center;
 }
 
 .title {
-  margin: 0 0 8px;
-  color: var(--text);
-  font-size: .82rem;
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: .65rem;
   font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
-.detail {
+.heading {
   display: flex;
   align-items: flex-start;
   gap: 10px;
 }
 
-.detail .emoji {
-  margin-top: 1px;
-  font-size: 1.6rem;
+.heading .emoji {
+  margin-top: 2px;
+  font-size: 2rem;
+}
+
+.label {
+  color: currentColor;
+  font-size: 1.1rem;
+}
+
+.health { min-width: 0; }
+
+.scoreLine {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.scoreLine strong { color: var(--text); font-size: 1.08rem; letter-spacing: 0; }
+.scoreLine small { margin-left: 3px; color: var(--muted); font-size: .65rem; }
+
+.progress {
+  height: 9px;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid #30475f;
+  border-radius: 999px;
+  background: #09111a;
+}
+
+.progress > span { display: block; height: 100%; border-radius: inherit; background: currentColor; box-shadow:0 0 16px currentColor; }
+.unscored::after { display: block; width: 36%; height: 100%; content: ""; border-radius: inherit; background: #6e5db0; }
+.operationalStatus { margin: 10px 0 0; color: var(--text); font-size: .78rem; font-weight: 800; }
+.summary { margin: 4px 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+
+@media (max-width: 800px) {
+  .full { grid-template-columns: 1fr; gap: 14px; }
 }

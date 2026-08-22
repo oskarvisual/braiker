@@ -16,17 +16,21 @@ describe("survivalMoodEmoji", () => {
   });
 
   it("renders the mood as a bare emoji instead of an icon tile", () => {
-    const markup = renderToStaticMarkup(createElement(BotSurvivalStatus, { compact: true, state: { code: "STABLE", label: "Stable", summary: "Capital is healthy.", tone: "neutral" } }));
+    const markup = renderToStaticMarkup(createElement(BotSurvivalStatus, { compact: true, state: { code: "STABLE", label: "Stable", summary: "Capital is healthy.", tone: "neutral", score: 75, operationalStatus: "Operating normally" } }));
 
     expect(markup).toContain("🙂");
     expect(markup).not.toContain("<i");
   });
 
-  it("makes the informational title and current state explanation visible in the full view", () => {
-    const markup = renderToStaticMarkup(createElement(BotSurvivalStatus, { state: { code: "STABLE", label: "Stable", summary: "Capital is currently deployed or reserved, so liquid cash alone is not a survival signal.", tone: "neutral" } }));
+  it("makes the score, accessible health bar, operation state, and explanation visible in the full view", () => {
+    const markup = renderToStaticMarkup(createElement(BotSurvivalStatus, { state: { code: "STABLE", label: "Stable", summary: "Capital is currently deployed or reserved, so liquid cash alone is not a survival signal.", tone: "neutral", score: 75, operationalStatus: "Operating normally" } }));
 
     expect(markup).toContain("Survival is informational");
     expect(markup).toContain("Stable");
+    expect(markup).toContain("75");
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-valuenow="75"');
+    expect(markup).toContain("Operating normally");
     expect(markup).toContain("Capital is currently deployed or reserved, so liquid cash alone is not a survival signal.");
     expect(markup).toContain("🙂");
   });

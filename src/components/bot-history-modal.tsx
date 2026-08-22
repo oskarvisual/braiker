@@ -39,7 +39,7 @@ export function BotHistoryModal({ bot, onClose }: { bot: HistoryBot; onClose: ()
   }, [bot.id, pushToast]);
 
   const history = data?.bot ?? { id: bot.id, name: bot.name, lifeStatus: "ACTIVE" as const, runMode: "OFF" as const, status: "PAUSED", killSwitch: true, initialCapital: "0", currentCapital: "0", reservedCapital: "0", openPositionCount: 0, symbols: [] };
-  const survival = deriveBotSurvivalState({ lifeStatus: history.lifeStatus, initialCapital: history.initialCapital, currentCapital: history.currentCapital, reservedCapital: history.reservedCapital, openPositionCount: history.openPositionCount, lastAnalysisAt: data?.scans[0]?.startedAt ?? null });
+  const survival = deriveBotSurvivalState({ lifeStatus: history.lifeStatus, initialCapital: history.initialCapital, currentCapital: history.currentCapital, reservedCapital: history.reservedCapital, openPositionCount: history.openPositionCount, lastAnalysisAt: data?.scans[0]?.startedAt ?? null, killSwitch: history.killSwitch });
   const chatActive = isBotChatAvailable(history);
   const power = botPowerState(history.runMode);
 

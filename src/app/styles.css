@@ -90,7 +90,9 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .briefBotInputs { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; margin-top:14px; }.briefBotInputs > strong { grid-column:1/-1; color:var(--text); }.briefBotInputs article { padding:12px; border:1px solid #263748; border-radius:9px; background:#0c1721; }.briefBotInputs article p { margin:0; color:var(--text); }.briefBotInputs article small { color:var(--muted); }.briefBotInputs ul { margin:8px 0 0; padding-left:18px; }.briefBotInputs li { margin:5px 0; }
 
 /* Survival is a read-only health explanation; the current state is the primary detail. */
-.survivalPanel { grid-template-columns:minmax(330px,1fr) minmax(330px,1.15fr); }
+.survivalPanel { grid-template-columns:minmax(0,1fr); gap:14px; padding:20px; background:#0d1720; }
+.survivalPanel dl { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.survivalPanel dl div { min-height:74px; padding:12px; background:#101b25; }
 @media (max-width:800px) { .survivalPanel { grid-template-columns:1fr; } }
 
 /* Settings accordions are disclosures, never primary actions. Keep their
