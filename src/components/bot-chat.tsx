@@ -1,17 +1,19 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type Message = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; content: string; createdAt: string };
 type Session = { id: string; title: string; kind: "CONVERSATION" | "MANAGER_NOTE"; createdAt: string; updatedAt: string };
 type Payload = { active: boolean; sessions: Session[]; selectedSessionId: string | null; messages: Message[] };
+export type BotChatContextRequest = { key: string; title: string; content: string; focus: { kind: "ORDER" | "SCAN"; id: string } };
 
 /** Local-only contextual chat. It is deliberately not a Telegram surface. */
-export function BotChat({ botId, botName, active: initialActive, compact = false }: { botId: string; botName: string; active?: boolean; compact?: boolean }) {
+export function BotChat({ botId, botName, active: initialActive, compact = false, contextRequest }: { botId: string; botName: string; active?: boolean; compact?: boolean; contextRequest?: BotChatContextRequest | null }) {
   const [data, setData] = useState<Payload | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const handledContextRequest = useRef<string | null>(null);
   const active = data?.active ?? initialActive ?? false;
 
   async function load(sessionId?: string | null) {
@@ -24,6 +26,20 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   }
 
   useEffect(() => { void load().catch(() => setData({ active: false, sessions: [], selectedSessionId: null, messages: [] })); }, [botId]);
+
+  useEffect(() => {
+    if (!contextRequest || !data || !active || sending || handledContextRequest.current === contextRequest.key) return;
+    handledContextRequest.current = contextRequest.key;
+    setSending(true);
+    void fetch(`/api/bots/${botId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "ASK_CONTEXT", title: contextRequest.title, content: contextRequest.content, focus: contextRequest.focus }) })
+      .then(async (response) => {
+        const payload = await response.json() as { session?: Session };
+        if (!response.ok || !payload.session) throw new Error("BOT_CHAT_CONTEXT_FAILED");
+        await load(payload.session.id);
+      })
+      .catch(() => undefined)
+      .finally(() => setSending(false));
+  }, [active, botId, contextRequest, data, sending]);
 
   async function createSession() {
     if (!active || sending) return;

@@ -5,7 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/modules/auth/session";
 import { resolveManagerChatModel } from "@/modules/manager-chat/manager-chat";
 import { OpenAiManagerChat } from "@/modules/manager-chat/openai-manager-chat";
-import { createBotChatSession, sendBotChatMessage } from "@/modules/bot-chat/bot-chat-service";
+import { createBotChatSession, sendBotChatMessage, type BotChatFocus } from "@/modules/bot-chat/bot-chat-service";
+
+function parseFocus(value: unknown): BotChatFocus | null {
+  if (!value || typeof value !== "object") return null;
+  const focus = value as { kind?: unknown; id?: unknown };
+  return (focus.kind === "ORDER" || focus.kind === "SCAN") && typeof focus.id === "string" && focus.id.length > 0 && focus.id.length <= 64
+    ? { kind: focus.kind, id: focus.id }
+    : null;
+}
 
 async function authorize(botId: string) {
   const user = await requireUser();
@@ -34,11 +42,20 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
 export async function POST(request: Request, context: { params: Promise<{ botId: string }> }) {
   try {
     assertSameOrigin(request);
-    const [params, body] = await Promise.all([context.params, request.json() as Promise<{ action?: unknown; content?: unknown; sessionId?: unknown; title?: unknown }>]);
+    const [params, body] = await Promise.all([context.params, request.json() as Promise<{ action?: unknown; content?: unknown; sessionId?: unknown; title?: unknown; focus?: unknown }>]);
     const user = await authorize(params.botId);
     if (body.action === "CREATE_SESSION") {
       const session = await createBotChatSession({ userId: user.id, botId: params.botId, title: typeof body.title === "string" ? body.title : undefined }, prisma);
       return NextResponse.json({ session: { id: session.id, title: session.title, kind: session.kind, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() } });
+    }
+    if (body.action === "ASK_CONTEXT") {
+      const focus = parseFocus(body.focus);
+      if (typeof body.content !== "string" || !focus) return NextResponse.json({ error: "BOT_CHAT_CONTEXT_REQUIRED" }, { status: 400 });
+      const session = await createBotChatSession({ userId: user.id, botId: params.botId, title: typeof body.title === "string" ? body.title : "Contextual explanation" }, prisma);
+      const runtime = env();
+      const responder = new OpenAiManagerChat({ apiKey: runtime.OPENAI_API_KEY, model: resolveManagerChatModel({ managerModel: runtime.BOT_MANAGER_CHAT_MODEL, defaultModel: runtime.OPENAI_MODEL }), timeoutMs: runtime.OPENAI_TIMEOUT_MS });
+      const result = await sendBotChatMessage({ userId: user.id, botId: params.botId, sessionId: session.id, content: body.content, focus }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
+      return NextResponse.json({ session: { id: session.id, title: session.title, kind: session.kind, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() }, result });
     }
     if (typeof body.content !== "string" || typeof body.sessionId !== "string") return NextResponse.json({ error: "BOT_CHAT_MESSAGE_REQUIRED" }, { status: 400 });
     const runtime = env();

@@ -9,7 +9,7 @@ export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
