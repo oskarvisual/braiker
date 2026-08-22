@@ -25,12 +25,17 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       model: resolveManagerChatModel({ managerModel: runtime.BOT_MANAGER_CHAT_MODEL, defaultModel: runtime.OPENAI_MODEL }),
       timeoutMs: runtime.OPENAI_TIMEOUT_MS
     });
-    const result = await sendManagerMessage({ userId: user.id, sessionId: params.sessionId, content: body.content }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
+    const result = await sendManagerMessage({ userId: user.id, sessionId: params.sessionId, content: body.content, actorRole: user.role, requestedVia: "WEB" }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
     // Telegram is an optional mirror. A delivery error must never make the
     // persisted browser conversation appear to have failed.
     const telegram = await mirrorWebManagerExchangeToTelegram({ userId: user.id, sessionId: params.sessionId, content: body.content, reply: result.reply })
       .catch(() => ({ mirrored: false }));
-    return NextResponse.json({ ...result, telegramMirrored: telegram.mirrored });
+    const { actionProposal, ...response } = result;
+    return NextResponse.json({
+      ...response,
+      ...(actionProposal ? { actionProposal: { id: actionProposal.id, botName: actionProposal.botName, action: actionProposal.action, expiresAt: actionProposal.expiresAt.toISOString() } } : {}),
+      telegramMirrored: telegram.mirrored
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "MANAGER_MESSAGE_FAILED";
     const status = message === "FORBIDDEN" ? 403 : message === "UNAUTHENTICATED" || message === "PASSWORD_CHANGE_REQUIRED" ? 401 : message === "MANAGER_SESSION_NOT_FOUND" ? 404 : 400;

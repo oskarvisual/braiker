@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { synchronizeManagerSessions, type ManagerSession } from "@/components/manager-chat";
+import { managerActionSummary, synchronizeManagerSessions, type ManagerSession } from "@/components/manager-chat";
 
 const operationsSession: ManagerSession = {
   id: "operations-1",
@@ -37,5 +37,10 @@ describe("synchronizeManagerSessions", () => {
     const synchronized = synchronizeManagerSessions("removed-session", [operationsSession]);
 
     expect(synchronized.selectedId).toBe("operations-1");
+  });
+
+  it("renders the paper-only impact of a pending Manager power proposal", () => {
+    expect(managerActionSummary({ id: "proposal-1", botName: "Juan trAIder", action: "TURN_ON", expiresAt: "2026-08-22T15:10:00.000Z" }))
+      .toContain("turn ON Juan trAIder");
   });
 });

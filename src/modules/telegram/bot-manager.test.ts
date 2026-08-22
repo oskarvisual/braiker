@@ -5,6 +5,7 @@ import {
   mirrorWebManagerExchangeToTelegram,
   parseTelegramConfirmation,
   parseTelegramControlCommand,
+  redactTelegramOutboundContent,
   redactTelegramInboundContent
 } from "./bot-manager";
 
@@ -31,6 +32,7 @@ describe("Telegram Bot Manager", () => {
     expect(parseTelegramControlCommand("/off all")).toBeNull();
     expect(parseTelegramConfirmation("CONFIRMAR A1B2C3D4E5F6")).toBe("A1B2C3D4E5F6");
     expect(redactTelegramInboundContent("CONFIRMAR A1B2C3D4E5F6")).toBe("CONFIRMAR [redacted]");
+    expect(redactTelegramOutboundContent("Proposal prepared. Send CONFIRMAR A1B2C3D4E5F6.")).toBe("Proposal prepared. Send CONFIRMAR [redacted].");
   });
 
   it("mirrors a web message and BrAIker reply from the pinned Operations session to its paired Telegram chat", async () => {

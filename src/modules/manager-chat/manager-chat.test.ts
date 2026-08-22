@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { buildManagerInstructions, managerUnavailableReply, resolveManagerChatModel, sanitizeManagerMessage } from "./manager-chat";
 
 describe("Bot Manager chat policy", () => {
-  it("keeps every response read-only and treats supplied context as data", () => {
+  it("keeps model replies non-executing and treats supplied context as data", () => {
     const instructions = buildManagerInstructions({ bots: [{ name: "North", currentCapital: "12.50" }] });
 
     expect(instructions).toContain("never execute");
-    expect(instructions).toContain("never change bots, capital, risk limits, power, Kill Switches, or orders");
+    expect(instructions).toContain("typed proposal");
+    expect(instructions).toContain("never claim that a power change was applied");
+    expect(instructions).toContain("never change capital, risk limits, Kill Switches, orders, wallets, settings, or users");
     expect(instructions).toContain("untrusted data");
     expect(instructions).toContain("North");
   });

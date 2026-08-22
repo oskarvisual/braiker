@@ -49,6 +49,29 @@ describe("Bot Manager chat service", () => {
     }));
   });
 
+  it("prepares a named power proposal before asking the conversational model", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "proposal-1", expiresAt: new Date("2026-08-22T15:10:00.000Z") });
+    const responder = { reply: vi.fn() };
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "operations" }) },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}) },
+      botInstance: { findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Juan trAIder" }]) },
+      managerActionProposal: { create }
+    } as never;
+
+    const result = await sendManagerMessage({
+      userId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "operations",
+      content: "activate bot Juan trAIder",
+      actorRole: "ADMIN",
+      requestedVia: "WEB"
+    }, { db, responder, aiEnabled: false });
+
+    expect(result).toEqual(expect.objectContaining({ available: true, actionProposal: expect.objectContaining({ id: "proposal-1", botName: "Juan trAIder", action: "TURN_ON" }) }));
+    expect(responder.reply).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ botId: "bot-1", action: "TURN_ON" }) }));
+  });
+
   it("does not call the provider while the global AI circuit is quota-disabled", async () => {
     const responder = { reply: vi.fn() };
     const db = {

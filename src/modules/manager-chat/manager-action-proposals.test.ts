@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { confirmManagerActionProposal, createManagerActionProposal } from "./manager-action-proposals";
+import { confirmManagerActionProposal, createManagerActionProposal, listPendingManagerActionProposals } from "./manager-action-proposals";
 
 describe("Manager action proposals", () => {
   it("stores only a hash of the Telegram confirmation code", async () => {
@@ -40,7 +40,7 @@ describe("Manager action proposals", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
       id: "proposal-1", userId: "admin-1", status: "PENDING", codeHash: expect.any(String)
     }), data: expect.objectContaining({ status: "CONFIRMING" }) }));
-    expect(applyControl).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-1", action: "TURN_OFF", actorId: "admin-1", actorRole: "ADMIN" }));
+    expect(applyControl).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-1", action: "TURN_OFF", actorId: "admin-1", actorRole: "ADMIN", db }));
     expect(update).toHaveBeenCalledWith({ where: { id: "proposal-1" }, data: expect.objectContaining({ status: "EXECUTED" }) });
   });
 
@@ -50,5 +50,17 @@ describe("Manager action proposals", () => {
       proposalId: "proposal-1", actorId: "admin-1", actorRole: "ADMIN", channel: "TELEGRAM", confirmationCode: "wrong"
     }, { db: { managerActionProposal: { updateMany: vi.fn().mockResolvedValue({ count: 0 }), update: vi.fn(), findUnique: vi.fn() } } as never, applyControl })).rejects.toThrow("MANAGER_ACTION_CONFIRMATION_INVALID");
     expect(applyControl).not.toHaveBeenCalled();
+  });
+
+  it("lists only the caller's still-actionable proposals so a web refresh keeps the confirmation visible", async () => {
+    const now = new Date("2026-08-22T15:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{ id: "proposal-1", action: "TURN_ON", expiresAt: new Date("2026-08-22T15:10:00.000Z"), bot: { name: "Juan trAIder" } }]);
+
+    await expect(listPendingManagerActionProposals("admin-1", { managerActionProposal: { findMany } } as never, now)).resolves.toEqual([
+      { id: "proposal-1", action: "TURN_ON", expiresAt: new Date("2026-08-22T15:10:00.000Z"), botName: "Juan trAIder" }
+    ]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: "admin-1", status: "PENDING", expiresAt: { gt: now } }
+    }));
   });
 });

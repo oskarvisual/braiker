@@ -11,6 +11,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
   beforeAll(async () => db?.$connect());
   beforeEach(async () => {
     if (!db) return;
+    await db.managerActionProposal.deleteMany();
     await db.telegramManagerMessage.deleteMany();
     await db.telegramManagerSession.deleteMany();
     await db.telegramPairingCode.deleteMany();
@@ -18,6 +19,8 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
     await db.managerChatMessage.deleteMany();
     await db.managerChatSession.deleteMany();
     await db.notificationSettings.deleteMany();
+    await db.botInstance.deleteMany({ where: { name: "Juan trAIder" } });
+    await db.wallet.deleteMany({ where: { name: { startsWith: "telegram-manager-wallet-" } } });
     await db.user.deleteMany({ where: { email: { startsWith: "telegram-manager-test-" } } });
   });
   afterAll(async () => db?.$disconnect());
@@ -58,11 +61,11 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
     ]);
     expect(session.telegramChatId).toBe("1234567");
     expect(pairing.consumedAt).toEqual(now);
-    expect(messages.map((message) => message.content)).toEqual(["/start [redacted]", "Bot Manager paired. Use /help for read-only commands."]);
+    expect(messages.map((message) => message.content)).toEqual(["/start [redacted]", "Bot Manager paired. Use /help for supported commands."]);
     expect(messages.some((message) => message.content.includes(code))).toBe(false);
     expect(runtime.nextUpdateId).toBe("102");
     expect(managerSession).toMatchObject({ userId: user.id, kind: "OPERATIONS", pinned: true, title: "Bot Manager · Operations" });
-    expect(sent).toEqual([{ chatId: "1234567", text: "Bot Manager paired. Use /help for read-only commands." }]);
+    expect(sent).toEqual([{ chatId: "1234567", text: "Bot Manager paired. Use /help for supported commands." }]);
   });
 
   it("rejects ordinary Telegram messages until both pairing and message access are enabled", async () => {
@@ -107,6 +110,28 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
       ["ASSISTANT", "SYSTEM", expect.stringContaining("paused")]
     ]);
     expect(sent[0]).toContain("paused");
+  });
+
+  it("prepares and confirms the same named ON proposal that the web Manager uses", async () => {
+    if (!db) throw new Error("BRAIKER_TEST_DATABASE_URL is required");
+    const user = await db.user.create({ data: { email: `telegram-manager-test-${crypto.randomUUID()}@example.test`, passwordHash: "not-a-real-password", role: "ADMIN", mustChangePassword: false } });
+    const wallet = await db.wallet.create({ data: { name: `telegram-manager-wallet-${crypto.randomUUID()}`, managedCapital: "100", unallocatedCapital: "100" } });
+    const bot = await db.botInstance.create({ data: { walletId: wallet.id, name: "Juan trAIder", riskPolicy: {}, strategyProfile: {}, currentCapital: "10", initialCapital: "10", runMode: "OFF", status: "PAUSED", killSwitch: true } });
+    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramReceiveMessages: true } });
+    await db.telegramManagerSession.create({ data: { scope: "global", telegramChatId: "paired-chat", userId: user.id, linkedAt: new Date() } });
+    const sent: string[] = [];
+    const api: TelegramApi = { getUpdates: async () => [{ updateId: "404", chatId: "paired-chat", text: "activate bot Juan trAIder" }], sendMessage: async (_chatId, text) => { sent.push(text); } };
+
+    await expect(pollTelegramBotManager(new Date("2026-08-22T15:00:00.000Z"), { db, api, token: "synthetic-test-token", aiEnabled: false })).resolves.toEqual({ processed: 1 });
+    const proposal = await db.managerActionProposal.findFirstOrThrow({ where: { botId: bot.id } });
+    const code = /CONFIRMAR\s+([A-F0-9]{12})/.exec(sent[0] ?? "")?.[1];
+    expect(proposal.action).toBe("TURN_ON");
+    expect(code).toBeTruthy();
+    await expect(db.telegramManagerMessage.findFirstOrThrow({ where: { direction: "OUTBOUND" }, orderBy: { createdAt: "desc" } })).resolves.toMatchObject({ content: expect.stringContaining("CONFIRMAR [redacted]") });
+
+    const confirmationApi: TelegramApi = { getUpdates: async () => [{ updateId: "405", chatId: "paired-chat", text: `CONFIRMAR ${code}` }], sendMessage: async () => undefined };
+    await expect(pollTelegramBotManager(new Date("2026-08-22T15:01:00.000Z"), { db, api: confirmationApi, token: "synthetic-test-token", aiEnabled: false })).resolves.toEqual({ processed: 1 });
+    await expect(db.botInstance.findUniqueOrThrow({ where: { id: bot.id } })).resolves.toMatchObject({ runMode: "PAPER_ACTIVE", status: "RUNNING", killSwitch: false });
   });
 
   it("mirrors only the paired user's pinned browser Operations exchange and persists its Telegram audit trail", async () => {

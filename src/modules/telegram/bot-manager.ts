@@ -25,6 +25,11 @@ export function redactTelegramInboundContent(text: string) {
   return safeText.replace(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted-telegram-token]").slice(0, 4_000);
 }
 
+/** Outbound confirmation codes are delivered once to Telegram but never retained in audit rows. */
+export function redactTelegramOutboundContent(text: string) {
+  return text.replace(/CONFIRMAR\s+[A-F0-9]{12}/gi, "CONFIRMAR [redacted]");
+}
+
 export function parseTelegramConfirmation(text: string) {
   const match = /^CONFIRMAR\s+([A-F0-9]{12})\s*$/i.exec(text.trim());
   return match?.[1]?.toUpperCase() ?? null;
@@ -36,13 +41,13 @@ export function parseTelegramControlCommand(text: string): { action: "TURN_ON" |
   return { action: match[1].toLowerCase() === "on" ? "TURN_ON" : "TURN_OFF", botId: match[2]!.toLowerCase() };
 }
 
-/** Telegram Bot Manager begins as an explicitly read-only command session. */
+/** Fixed commands remain informational; explicit power changes become proposals. */
 export function managerReplyForCommand(text: string) {
   const command = text.trim().toLowerCase().split(/\s+/)[0];
-  if (command === "/help") return "Use /status, /report, or /help for read-only information. Admins may prepare one bot change with /on <bot-id> or /off <bot-id>, then send CONFIRMAR <código>.";
+  if (command === "/help") return "Ask for status/reports or say activate/apaga <exact bot name>. Admins receive a proposal and must send CONFIRMAR <código>; /on <bot-id> and /off <bot-id> also work.";
   if (command === "/status") return "BrAIker Bot Manager is read-only. Use the dashboard for live service health and bot controls.";
   if (command === "/report") return "BrAIker Bot Manager is read-only. Use History and bot details for orders and decision reports.";
-  return "I cannot change capital, risk settings, instructions, Kill Switches, or orders from Telegram. Use /help for read-only commands and explicit one-bot proposals.";
+  return "I cannot change capital, risk settings, instructions, Kill Switches, or orders from Telegram. Use /help for information and explicit one-bot proposals.";
 }
 
 export function sanitizeTelegramError(error: unknown) {
@@ -132,8 +137,9 @@ async function processUpdate(
       await db.telegramManagerSession.upsert({ where: { scope: SCOPE }, create: { scope: SCOPE, telegramChatId: update.chatId, userId: pairing.userId, linkedAt: now, lastReceivedAt: now }, update: { telegramChatId: update.chatId, userId: pairing.userId, linkedAt: now, lastReceivedAt: now } });
       await ensureOperationsSession(pairing.userId, db);
       await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, telegramUpdateId: update.updateId, direction: "INBOUND", content: redactTelegramInboundContent(update.text), createdAt: now } });
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: "Bot Manager paired. Use /help for read-only commands.", createdAt: afterInboundMessage(now) } });
-      await api.sendMessage(update.chatId, "Bot Manager paired. Use /help for read-only commands.");
+      const reply = "Bot Manager paired. Use /help for supported commands.";
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
+      await api.sendMessage(update.chatId, reply);
       return true;
     }
     return false;
@@ -165,25 +171,30 @@ async function processUpdate(
     try {
       const proposal = await createManagerActionProposal({ userId: session.user.id, actorRole: session.user.role, botId: control.botId, action: control.action, requestedVia: "TELEGRAM", now }, db);
       const reply = `Proposal prepared: ${control.action === "TURN_ON" ? "turn ON" : "turn OFF"} bot ${control.botId}. Send CONFIRMAR ${proposal.confirmationCode} before ${proposal.expiresAt.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" })} ET.`;
-      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: redactTelegramInboundContent(reply), createdAt: afterInboundMessage(now) } });
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: redactTelegramOutboundContent(reply), createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     } catch {
-      const reply = "I could not prepare that change. Only the paired Admin may propose one valid bot control at a time.";
+      const reply = "I could not prepare that change. Only the paired Admin may prepare a valid bot-control proposal.";
       await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;
     }
   }
   const operations = await ensureOperationsSession(session.userId, db);
-  const reply = (await sendManagerMessage({
+  const managerResult = await sendManagerMessage({
     userId: session.userId,
     sessionId: operations.id,
     content: redactTelegramInboundContent(update.text),
     source: "TELEGRAM",
-    sourceReference: `telegram:${update.updateId}`
-  }, { db, responder: manager.responder, aiEnabled: manager.aiEnabled })).reply;
-  await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
+    sourceReference: `telegram:${update.updateId}`,
+    actorRole: session.user.role,
+    requestedVia: "TELEGRAM"
+  }, { db, responder: manager.responder, aiEnabled: manager.aiEnabled });
+  const reply = managerResult.actionProposal
+    ? `${managerResult.reply}\nSend CONFIRMAR ${managerResult.actionProposal.confirmationCode} before ${managerResult.actionProposal.expiresAt.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" })} ET.`
+    : managerResult.reply;
+  await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: redactTelegramOutboundContent(reply), createdAt: afterInboundMessage(now) } });
   await api.sendMessage(update.chatId, reply);
   return true;
 }

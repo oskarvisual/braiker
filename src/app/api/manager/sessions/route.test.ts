@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
   listManagerConversations: vi.fn(),
+  listPendingManagerActionProposals: vi.fn(),
   createManagerConversation: vi.fn()
 }));
 
@@ -11,6 +12,7 @@ vi.mock("@/modules/manager-chat/manager-chat-service", () => ({
   createManagerConversation: mocks.createManagerConversation,
   listManagerConversations: mocks.listManagerConversations
 }));
+vi.mock("@/modules/manager-chat/manager-action-proposals", () => ({ listPendingManagerActionProposals: mocks.listPendingManagerActionProposals }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
 describe("GET /api/manager/sessions", () => {
@@ -38,6 +40,7 @@ describe("GET /api/manager/sessions", () => {
         ]
       }
     ]);
+    mocks.listPendingManagerActionProposals.mockResolvedValue([{ id: "proposal-1", action: "TURN_ON", botName: "Juan trAIder", expiresAt: new Date("2026-08-22T15:10:00.000Z") }]);
 
     const route = (await import("./route")) as { GET?: () => Promise<Response> };
     expect(route.GET).toBeTypeOf("function");
@@ -64,9 +67,11 @@ describe("GET /api/manager/sessions", () => {
             }
           ]
         }
-      ]
+      ],
+      actionProposals: [{ id: "proposal-1", action: "TURN_ON", botName: "Juan trAIder", expiresAt: "2026-08-22T15:10:00.000Z" }]
     });
     expect(mocks.listManagerConversations).toHaveBeenCalledWith("admin-1", {});
+    expect(mocks.listPendingManagerActionProposals).toHaveBeenCalledWith("admin-1", {});
   });
 
   it("denies a non-admin without reading conversations", async () => {

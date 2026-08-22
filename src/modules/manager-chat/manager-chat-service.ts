@@ -1,13 +1,14 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, UserRole } from "@prisma/client";
 import { disableAiRuntimeForQuota, getAiRuntimeState } from "@/modules/ai/ai-runtime-state";
 import { managerUnavailableReply, sanitizeManagerMessage } from "./manager-chat";
 import type { ManagerChatHistoryItem, ManagerChatRequest } from "./openai-manager-chat";
+import { prepareManagerPowerProposal } from "./manager-power-intents";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "managerActionProposal">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
@@ -19,6 +20,8 @@ type SendManagerMessageInput = {
   content: string;
   source?: "WEB" | "TELEGRAM";
   sourceReference?: string;
+  actorRole?: UserRole;
+  requestedVia?: "WEB" | "TELEGRAM";
 };
 
 /**
@@ -154,6 +157,26 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
     await dependencies.db.managerChatMessage.create({
       data: { sessionId: session.id, sourceReference: input.sourceReference, role: "USER", source: input.source ?? "WEB", content }
     });
+  }
+
+  if (input.actorRole && input.requestedVia) {
+    const power = await prepareManagerPowerProposal({
+      userId: input.userId,
+      actorRole: input.actorRole,
+      content,
+      requestedVia: input.requestedVia
+    }, dependencies.db);
+    if (power.kind !== "none") {
+      await storeAssistantReply(session.id, power.reply, dependencies.db, replyReference);
+      if (power.kind === "proposal") {
+        return {
+          reply: power.reply,
+          available: true,
+          actionProposal: { id: power.id, botName: power.bot.name, action: power.action, expiresAt: power.expiresAt, confirmationCode: power.confirmationCode }
+        };
+      }
+      return { reply: power.reply, available: true };
+    }
   }
 
   const aiState = await getAiRuntimeState(dependencies.db);
