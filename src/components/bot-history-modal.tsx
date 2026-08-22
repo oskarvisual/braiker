@@ -6,6 +6,7 @@ import { BotSurvivalStatus } from "@/components/bot-survival-status";
 import { useToast } from "@/components/toast";
 import { botPowerState } from "@/modules/bots/power-state";
 import { deriveBotSurvivalState } from "@/modules/bots/survival-state";
+import { isBotChatAvailable } from "@/modules/bot-chat/availability";
 
 export type HistoryBot = { id: string; name: string };
 type HistoryOrder = { id: string; action: string; symbol: string; orderType: string; quantity: string; filledQuantity: string; averagePrice: string | null; status: string; historyState: string; createdAt: string };
@@ -39,7 +40,7 @@ export function BotHistoryModal({ bot, onClose }: { bot: HistoryBot; onClose: ()
 
   const history = data?.bot ?? { id: bot.id, name: bot.name, lifeStatus: "ACTIVE" as const, runMode: "OFF" as const, status: "PAUSED", killSwitch: true, initialCapital: "0", currentCapital: "0", reservedCapital: "0", openPositionCount: 0, symbols: [] };
   const survival = deriveBotSurvivalState({ lifeStatus: history.lifeStatus, initialCapital: history.initialCapital, currentCapital: history.currentCapital, reservedCapital: history.reservedCapital, openPositionCount: history.openPositionCount, lastAnalysisAt: data?.scans[0]?.startedAt ?? null });
-  const chatActive = history.runMode === "PAPER_ACTIVE" && history.lifeStatus === "ACTIVE" && history.status === "RUNNING" && !history.killSwitch;
+  const chatActive = isBotChatAvailable(history);
   const power = botPowerState(history.runMode);
 
   function askAbout(title: string, content: string, focus: BotChatContextRequest["focus"]) {

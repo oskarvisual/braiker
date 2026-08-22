@@ -6,6 +6,7 @@ import { requireUser } from "@/modules/auth/session";
 import { resolveManagerChatModel } from "@/modules/manager-chat/manager-chat";
 import { OpenAiManagerChat } from "@/modules/manager-chat/openai-manager-chat";
 import { createBotChatSession, sendBotChatMessage, type BotChatFocus } from "@/modules/bot-chat/bot-chat-service";
+import { isBotChatAvailable } from "@/modules/bot-chat/availability";
 
 function parseFocus(value: unknown): BotChatFocus | null {
   if (!value || typeof value !== "object") return null;
@@ -31,7 +32,7 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
     const requestedSessionId = new URL(request.url).searchParams.get("sessionId");
     const selectedSession = sessions.find((session) => session.id === requestedSessionId) ?? sessions[0] ?? null;
     const messages = selectedSession ? await prisma.botChatMessage.findMany({ where: { sessionId: selectedSession.id }, orderBy: { createdAt: "asc" }, take: 100 }) : [];
-    const active = Boolean(bot && bot.runMode === "PAPER_ACTIVE" && bot.lifeStatus === "ACTIVE" && bot.status === "RUNNING" && !bot.killSwitch);
+    const active = isBotChatAvailable(bot);
     return NextResponse.json({ active, sessions: sessions.map((session) => ({ ...session, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() })), selectedSessionId: selectedSession?.id ?? null, messages: messages.map((message) => ({ id: message.id, role: message.role, content: message.content, createdAt: message.createdAt.toISOString() })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const code = error instanceof Error ? error.message : "BOT_CHAT_FAILED";

@@ -13,6 +13,7 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const handledContextRequest = useRef<string | null>(null);
   const active = data?.active ?? initialActive ?? false;
 
@@ -23,9 +24,13 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
     const next = await response.json() as Payload;
     setData(next);
     setSelectedSessionId(next.selectedSessionId);
+    setLoadFailed(false);
   }
 
-  useEffect(() => { void load().catch(() => setData({ active: false, sessions: [], selectedSessionId: null, messages: [] })); }, [botId]);
+  useEffect(() => {
+    setData(null); setLoadFailed(false);
+    void load().catch(() => setLoadFailed(true));
+  }, [botId]);
 
   useEffect(() => {
     if (!contextRequest || !data || !active || sending || handledContextRequest.current === contextRequest.key) return;
@@ -69,6 +74,7 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
     } finally { setSending(false); }
   }
 
+  if (loadFailed && !data) return <section className="botChatLocked botChatUnavailable" role="alert"><p className="eyebrow">LOCAL BOT CHAT</p><h3>Chat is temporarily unavailable</h3><p>The bot state was not changed. Reload this view and try again; if the issue continues, check the worker and database status.</p></section>;
   if (!active) return <section className="botChatLocked"><p className="eyebrow">LOCAL BOT CHAT</p><h3>Chat is locked while this bot is OFF</h3><p>Turn the bot on first. Individual chats never use Telegram and cannot place orders or change capital, risk, instructions, Kill Switch, or bot power.</p></section>;
 
   return <section className={`botChat ${compact ? "botChatCompact" : ""}`}>

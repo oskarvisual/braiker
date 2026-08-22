@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { managerUnavailableReply, sanitizeManagerMessage } from "@/modules/manager-chat/manager-chat";
 import type { ManagerResponder } from "@/modules/manager-chat/manager-chat-service";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
+import { isBotChatAvailable } from "@/modules/bot-chat/availability";
 
 type BotChatDb = Pick<PrismaClient, "botChatSession" | "botChatMessage" | "botDailyContext" | "botInstance" | "order" | "tradeProposal" | "botScanRun">;
 
@@ -20,7 +21,7 @@ export async function createBotChatSession(input: { userId: string; botId: strin
 async function assertBotCanChat(botId: string, db: Pick<PrismaClient, "botInstance">) {
   const bot = await db.botInstance.findUnique({ where: { id: botId }, select: { id: true, runMode: true, lifeStatus: true, status: true, killSwitch: true } });
   if (!bot) throw new Error("BOT_NOT_FOUND");
-  if (bot.runMode !== "PAPER_ACTIVE" || bot.lifeStatus !== "ACTIVE" || bot.status !== "RUNNING" || bot.killSwitch) throw new Error("BOT_CHAT_REQUIRES_ACTIVE_BOT");
+  if (!isBotChatAvailable(bot)) throw new Error("BOT_CHAT_REQUIRES_ACTIVE_BOT");
   return bot;
 }
 
