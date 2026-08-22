@@ -4,3 +4,25 @@
   font-style: normal;
   line-height: 1;
 }
+
+.full {
+  display: block;
+}
+
+.title {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 800;
+}
+
+.detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.detail .emoji {
+  margin-top: 1px;
+  font-size: 1.6rem;
+}
