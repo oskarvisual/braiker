@@ -93,6 +93,8 @@ export async function mirrorWebManagerExchangeToTelegram(
   const token = overrides.token ?? env().TELEGRAM_BOT_TOKEN;
   if (!token) return { mirrored: false };
   const db = overrides.db ?? prisma;
+  const settings = await db.notificationSettings.findUnique({ where: { scope: SCOPE }, select: { telegramManagerEnabled: true } });
+  if (!settings?.telegramManagerEnabled) return { mirrored: false };
   const pairing = await db.telegramManagerSession.findUnique({ where: { scope: SCOPE } });
   if (!pairing || pairing.userId !== input.userId) return { mirrored: false };
   const operations = await ensureOperationsSession(input.userId, db);
@@ -127,6 +129,8 @@ async function processUpdate(
   api: TelegramApi,
   manager: { responder: ManagerResponder; aiEnabled: boolean }
 ) {
+  const settings = await db.notificationSettings.findUnique({ where: { scope: SCOPE }, select: { telegramManagerEnabled: true, telegramReceiveMessages: true } });
+  if (!settings?.telegramManagerEnabled) return false;
   const previous = await db.telegramManagerMessage.findUnique({ where: { telegramUpdateId: update.updateId } });
   if (previous) return false;
   if (!update.chatId || !update.text) return false;
@@ -146,7 +150,6 @@ async function processUpdate(
     return false;
   }
   const session = await db.telegramManagerSession.findUnique({ where: { telegramChatId: update.chatId }, include: { user: { select: { id: true, role: true } } } });
-  const settings = await db.notificationSettings.findUnique({ where: { scope: SCOPE }, select: { telegramReceiveMessages: true } });
   if (!session || !settings?.telegramReceiveMessages) return false;
   await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, telegramUpdateId: update.updateId, direction: "INBOUND", content: redactTelegramInboundContent(update.text), createdAt: now } });
   await db.telegramManagerSession.update({ where: { scope: SCOPE }, data: { lastReceivedAt: now } });
@@ -205,6 +208,8 @@ export async function pollTelegramBotManager(now = new Date(), overrides: { db?:
   const token = overrides.token ?? env().TELEGRAM_BOT_TOKEN;
   if (!token) return { processed: 0 };
   const db = overrides.db ?? prisma;
+  const settings = await db.notificationSettings.findUnique({ where: { scope: SCOPE }, select: { telegramManagerEnabled: true } });
+  if (!settings?.telegramManagerEnabled) return { processed: 0 };
   const state = await db.telegramRuntimeState.findUnique({ where: { scope: SCOPE } });
   const api = overrides.api ?? telegramApi(token);
   const runtime = env();

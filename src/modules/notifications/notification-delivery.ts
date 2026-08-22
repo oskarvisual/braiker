@@ -27,7 +27,7 @@ export type AlertForDelivery = {
 
 type WebhookSettings = { enabled: boolean; url: string | null; events: string[] };
 type EmailSettings = { enabled: boolean; smtpConfigured: boolean; recipients: string[]; events: string[] };
-type TelegramSettings = { enabled: boolean; configured: boolean; paired: boolean; events: string[] };
+type TelegramSettings = { managerEnabled: boolean; enabled: boolean; configured: boolean; paired: boolean; events: string[] };
 export type DeliveryPlanInput = { alert: AlertForDelivery; now: Date; retryAfterMs: number; webhook: WebhookSettings; email: EmailSettings; telegram: TelegramSettings };
 export type PlannedDelivery = { channel: "webhook" | "email" | "telegram"; destination: string };
 type NotificationDeliveryDb = Pick<PrismaClient, "notificationSettings" | "notificationAlert" | "telegramManagerSession" | "managerChatSession" | "managerChatMessage">;
@@ -60,7 +60,7 @@ export function planNotificationDeliveries(input: DeliveryPlanInput): PlannedDel
   if (input.email.enabled && input.email.smtpConfigured && input.email.recipients.length > 0 && selected(input.email.events, input.alert.eventType) && deliveryDue(input.alert.emailDeliveredAt, input.alert.emailLastAttemptAt, input.now, input.retryAfterMs)) {
     deliveries.push({ channel: "email", destination: input.email.recipients.join(", ") });
   }
-  if (input.telegram.enabled && input.telegram.configured && input.telegram.paired && selected(input.telegram.events, input.alert.eventType) && deliveryDue(input.alert.telegramDeliveredAt, input.alert.telegramLastAttemptAt, input.now, input.retryAfterMs)) {
+  if (input.telegram.managerEnabled && input.telegram.enabled && input.telegram.configured && input.telegram.paired && selected(input.telegram.events, input.alert.eventType) && deliveryDue(input.alert.telegramDeliveredAt, input.alert.telegramLastAttemptAt, input.now, input.retryAfterMs)) {
     deliveries.push({ channel: "telegram", destination: "paired-bot-manager" });
   }
   return deliveries;
@@ -181,7 +181,7 @@ export async function dispatchPendingNotificationAlerts(now = new Date(), overri
   }
   const webhook = { enabled: settings.webhookEnabled, url: webhookUrl, events: notificationEvents(settings.webhookEvents) };
   const email = { enabled: settings.emailEnabled, smtpConfigured: overrides.smtpConfigured ?? Boolean(runtime.SMTP_HOST && runtime.SMTP_FROM), recipients: emailRecipients(settings.emailRecipients), events: notificationEvents(settings.emailEvents) };
-  const telegram = { enabled: settings.telegramEnabled, configured: Boolean(runtime.TELEGRAM_BOT_TOKEN), paired: Boolean(telegramSession), events: notificationEvents(settings.telegramEvents) };
+  const telegram = { managerEnabled: settings.telegramManagerEnabled, enabled: settings.telegramEnabled, configured: Boolean(runtime.TELEGRAM_BOT_TOKEN), paired: Boolean(telegramSession), events: notificationEvents(settings.telegramEvents) };
   let delivered = 0;
   let failed = 0;
   for (const alert of alerts) {

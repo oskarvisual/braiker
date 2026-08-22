@@ -83,6 +83,12 @@ export function validateTelegramNotificationChannel(input: { enabled: boolean; c
   return null;
 }
 
+/** The master switch is independent from a configured environment token. */
+export function validateTelegramManagerChannel(input: { enabled: boolean; configured: boolean }) {
+  if (!input.enabled || input.configured) return null;
+  return "Telegram needs a server-side bot token before Bot Manager can be enabled.";
+}
+
 export function validateTelegramMessageAccess(input: { receiveMessages: boolean; configured: boolean; paired: boolean }) {
   if (!input.receiveMessages) return null;
   if (!input.configured) return "Telegram needs a server-side bot token before messages can be enabled.";

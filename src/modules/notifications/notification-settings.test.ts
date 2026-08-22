@@ -3,6 +3,7 @@ import {
   notificationEvents,
   validateEmailNotificationChannel,
   validateNotificationChannel,
+  validateTelegramManagerChannel,
   validateWebhookNotificationChannel,
 } from "./notification-settings";
 
@@ -50,5 +51,11 @@ describe("notification settings", () => {
         events: ["BOT_DEAD"],
       }),
     ).toBeNull();
+  });
+
+  it("rejects enabling the Telegram manager without a server token", () => {
+    expect(validateTelegramManagerChannel({ enabled: true, configured: false }))
+      .toBe("Telegram needs a server-side bot token before Bot Manager can be enabled.");
+    expect(validateTelegramManagerChannel({ enabled: false, configured: false })).toBeNull();
   });
 });

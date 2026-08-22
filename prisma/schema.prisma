@@ -728,6 +728,7 @@ model NotificationSettings {
   emailEnabled        Boolean  @default(false)
   emailRecipients     Json
   emailEvents         Json
+  telegramManagerEnabled Boolean @default(false)
   telegramEnabled     Boolean  @default(false)
   telegramEvents      Json
   telegramReceiveMessages Boolean @default(false)

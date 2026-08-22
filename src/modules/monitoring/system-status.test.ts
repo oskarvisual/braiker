@@ -11,7 +11,7 @@ describe("system status", () => {
       workerHeartbeat: async () => new Date("2026-08-21T11:59:20.000Z"),
       alpacaHealth: async () => ({ healthy: true }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:59:30.000Z"),
-      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: "ciphertext", emailEnabled: true, telegramEnabled: true, telegramReceiveMessages: true }),
+      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: "ciphertext", emailEnabled: true, telegramManagerEnabled: true, telegramEnabled: true, telegramReceiveMessages: true }),
       telegramManagerSession: async () => ({ scope: "global" }),
       openAiQuotaAlert: async () => false,
       openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
@@ -42,7 +42,7 @@ describe("system status", () => {
       workerHeartbeat: async () => new Date("2026-08-21T11:55:00.000Z"),
       alpacaHealth: async () => ({ healthy: false }),
       marketStreamHeartbeat: async () => new Date("2026-08-21T11:55:00.000Z"),
-      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: null, emailEnabled: false, telegramEnabled: true, telegramReceiveMessages: false }),
+      notificationSettings: async () => ({ webhookEnabled: true, encryptedWebhookUrl: null, emailEnabled: false, telegramManagerEnabled: true, telegramEnabled: true, telegramReceiveMessages: false }),
       telegramManagerSession: async () => null,
       openAiQuotaAlert: async () => false,
       openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
@@ -61,6 +61,24 @@ describe("system status", () => {
       expect.objectContaining({ id: "telegram", state: "warning" })
     ]));
     expect(status.services.find((service) => service.id === "openai")?.detail).toContain("only when a candidate requires review");
+  });
+
+  it("reports Telegram disabled when its persisted master switch is off despite a configured token and pairing", async () => {
+    const status = await getSystemStatus({
+      now: () => now,
+      databaseCheck: async () => undefined,
+      workerHeartbeat: async () => now,
+      alpacaHealth: async () => ({ healthy: true }),
+      marketStreamHeartbeat: async () => now,
+      notificationSettings: async () => ({ webhookEnabled: false, encryptedWebhookUrl: null, emailEnabled: false, telegramManagerEnabled: false, telegramEnabled: true, telegramReceiveMessages: true }),
+      telegramManagerSession: async () => ({ scope: "global" }),
+      openAiQuotaAlert: async () => false,
+      openAiRuntimeState: async () => ({ status: "ACTIVE", disabledAt: null, lastCheckedAt: null }),
+      botCounts: async () => ({ on: 0, off: 0, dead: 0 }),
+      config: { aiEnabled: false, smtpConfigured: false, telegramConfigured: true }
+    });
+
+    expect(status.services).toContainEqual(expect.objectContaining({ id: "telegram", state: "disabled", detail: "Bot Manager on Telegram is disabled in Settings." }));
   });
 
   it("shows an OpenAI quota rejection as an actionable warning without exposing provider details", async () => {

@@ -11,6 +11,8 @@ export async function POST(request: Request) {
     const user = await requireUser();
     if (user.role !== "ADMIN") return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     if (!env().TELEGRAM_BOT_TOKEN) return NextResponse.json({ error: "TELEGRAM_NOT_CONFIGURED" }, { status: 400 });
+    const settings = await prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { telegramManagerEnabled: true } });
+    if (!settings?.telegramManagerEnabled) return NextResponse.json({ error: "TELEGRAM_MANAGER_DISABLED" }, { status: 400 });
 
     const code = createTelegramPairingCode();
     const expiresAt = pairingExpiresAt();
@@ -22,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ code, expiresAt: expiresAt.toISOString() });
   } catch (error) {
     const message = error instanceof Error ? error.message : "TELEGRAM_PAIRING_FAILED";
-    const safeError = message === "UNAUTHENTICATED" || message === "FORBIDDEN" || message === "TELEGRAM_NOT_CONFIGURED" ? message : "TELEGRAM_PAIRING_FAILED";
+    const safeError = message === "UNAUTHENTICATED" || message === "FORBIDDEN" || message === "TELEGRAM_NOT_CONFIGURED" || message === "TELEGRAM_MANAGER_DISABLED" ? message : "TELEGRAM_PAIRING_FAILED";
     return NextResponse.json({ error: safeError }, { status: safeError === "FORBIDDEN" ? 403 : safeError === "UNAUTHENTICATED" ? 401 : 400 });
   }
 }

@@ -16,7 +16,7 @@ type StatusDependencies = {
   workerHeartbeat: () => Promise<Date | null>;
   marketStreamHeartbeat: () => Promise<Date | null>;
   alpacaHealth: () => Promise<{ healthy: boolean }>;
-  notificationSettings: () => Promise<{ webhookEnabled: boolean; encryptedWebhookUrl: string | null; emailEnabled: boolean; telegramEnabled: boolean; telegramReceiveMessages: boolean } | null>;
+  notificationSettings: () => Promise<{ webhookEnabled: boolean; encryptedWebhookUrl: string | null; emailEnabled: boolean; telegramManagerEnabled: boolean; telegramEnabled: boolean; telegramReceiveMessages: boolean } | null>;
   telegramManagerSession: () => Promise<{ scope: string } | null>;
   openAiQuotaAlert: () => Promise<boolean>;
   openAiRuntimeState: () => Promise<AiRuntimeState>;
@@ -67,7 +67,7 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
     workerHeartbeat: overrides.workerHeartbeat ?? getWorkerHeartbeat,
     marketStreamHeartbeat: overrides.marketStreamHeartbeat ?? getMarketStreamHeartbeat,
     alpacaHealth: overrides.alpacaHealth ?? (() => globalPaperBroker().healthCheck()),
-    notificationSettings: overrides.notificationSettings ?? (() => prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { webhookEnabled: true, encryptedWebhookUrl: true, emailEnabled: true, telegramEnabled: true, telegramReceiveMessages: true } })),
+    notificationSettings: overrides.notificationSettings ?? (() => prisma.notificationSettings.findUnique({ where: { scope: "global" }, select: { webhookEnabled: true, encryptedWebhookUrl: true, emailEnabled: true, telegramManagerEnabled: true, telegramEnabled: true, telegramReceiveMessages: true } })),
     telegramManagerSession: overrides.telegramManagerSession ?? (() => prisma.telegramManagerSession.findUnique({ where: { scope: "global" }, select: { scope: true } })),
     openAiQuotaAlert: overrides.openAiQuotaAlert ?? (async () => (await prisma.notificationAlert.count({ where: { dedupeKey: "openai:quota", status: "OPEN" } })) > 0),
     openAiRuntimeState: overrides.openAiRuntimeState ?? (() => getAiRuntimeState()),
@@ -104,6 +104,8 @@ export async function getSystemStatus(overrides: Partial<StatusDependencies> = {
       : { id: "webhook", label: "Webhooks", state: "disabled", detail: "Webhook alerts are disabled." };
   const telegram: SystemStatusService = !dependencies.config.telegramConfigured
     ? { id: "telegram", label: "Telegram", state: "disabled", detail: "Telegram is not configured in the server environment." }
+    : !notifications?.telegramManagerEnabled
+      ? { id: "telegram", label: "Telegram", state: "disabled", detail: "Bot Manager on Telegram is disabled in Settings." }
     : !telegramSession
       ? { id: "telegram", label: "Telegram", state: "warning", detail: "Telegram is configured but no Bot Manager chat is paired." }
       : notifications?.telegramEnabled || notifications?.telegramReceiveMessages

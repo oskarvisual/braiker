@@ -36,7 +36,7 @@ describe("notification delivery planning", () => {
       retryAfterMs: 10 * 60_000,
       webhook: { enabled: true, url: "https://hooks.example.test/braiker", events: ["SYSTEM_STATUS_FAILURE"] },
       email: { enabled: true, smtpConfigured: true, recipients: ["ops@example.test"], events: ["OPENAI_QUOTA_EXHAUSTED"] },
-      telegram: { enabled: true, configured: true, paired: true, events: ["SYSTEM_STATUS_FAILURE"] }
+      telegram: { managerEnabled: true, enabled: true, configured: true, paired: true, events: ["SYSTEM_STATUS_FAILURE"] }
     })).toEqual([
       { channel: "webhook", destination: "https://hooks.example.test/braiker" },
       { channel: "telegram", destination: "paired-bot-manager" }
@@ -50,7 +50,7 @@ describe("notification delivery planning", () => {
       retryAfterMs: 10 * 60_000,
       webhook: { enabled: true, url: "https://alerts.example.test/braiker", events: ["BOT_MANAGER_DAILY_REPORT"] },
       email: { enabled: true, smtpConfigured: true, recipients: ["owner@example.test"], events: ["BOT_MANAGER_DAILY_REPORT"] },
-      telegram: { enabled: true, configured: true, paired: true, events: ["BOT_MANAGER_DAILY_REPORT"] }
+      telegram: { managerEnabled: true, enabled: true, configured: true, paired: true, events: ["BOT_MANAGER_DAILY_REPORT"] }
     })).toEqual([
       expect.objectContaining({ channel: "webhook" }),
       expect.objectContaining({ channel: "email" }),
@@ -65,7 +65,7 @@ describe("notification delivery planning", () => {
       retryAfterMs: 10 * 60_000,
       webhook: { enabled: true, url: "https://hooks.example.test/braiker", events: ["SYSTEM_STATUS_FAILURE"] },
       email: { enabled: false, smtpConfigured: false, recipients: [], events: [] },
-      telegram: { enabled: false, configured: false, paired: false, events: [] }
+      telegram: { managerEnabled: false, enabled: false, configured: false, paired: false, events: [] }
     })).toEqual([]);
     expect(planNotificationDeliveries({
       alert: { ...alert, webhookDeliveredAt: new Date("2026-08-21T12:01:00.000Z") },
@@ -73,7 +73,7 @@ describe("notification delivery planning", () => {
       retryAfterMs: 10 * 60_000,
       webhook: { enabled: true, url: "https://hooks.example.test/braiker", events: ["SYSTEM_STATUS_FAILURE"] },
       email: { enabled: false, smtpConfigured: false, recipients: [], events: [] },
-      telegram: { enabled: false, configured: false, paired: false, events: [] }
+      telegram: { managerEnabled: false, enabled: false, configured: false, paired: false, events: [] }
     })).toEqual([]);
   });
 
@@ -84,8 +84,19 @@ describe("notification delivery planning", () => {
       retryAfterMs: 10 * 60_000,
       webhook: { enabled: false, url: null, events: [] },
       email: { enabled: false, smtpConfigured: false, recipients: [], events: [] },
-      telegram: { enabled: true, configured: true, paired: true, events: ["SYSTEM_STATUS_FAILURE"] }
+      telegram: { managerEnabled: true, enabled: true, configured: true, paired: true, events: ["SYSTEM_STATUS_FAILURE"] }
     })).toEqual([{ channel: "telegram", destination: "paired-bot-manager" }]);
+  });
+
+  it("does not plan Telegram delivery when the master switch is off", () => {
+    expect(planNotificationDeliveries({
+      alert,
+      now: new Date("2026-08-21T12:06:00.000Z"),
+      retryAfterMs: 10 * 60_000,
+      webhook: { enabled: false, url: null, events: [] },
+      email: { enabled: false, smtpConfigured: false, recipients: [], events: [] },
+      telegram: { managerEnabled: false, enabled: true, configured: true, paired: true, events: ["SYSTEM_STATUS_FAILURE"] }
+    })).toEqual([]);
   });
 
   it("copies a delivered Telegram alert into the pinned Bot Manager operations session", async () => {

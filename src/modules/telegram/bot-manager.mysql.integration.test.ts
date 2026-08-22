@@ -38,7 +38,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
       }
     });
     await db.notificationSettings.create({
-      data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramReceiveMessages: true }
+      data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramManagerEnabled: true, telegramReceiveMessages: true }
     });
     await db.telegramPairingCode.create({
       data: { codeHash: hashTelegramPairingCode(code), userId: user.id, expiresAt: new Date(now.getTime() + 60_000) }
@@ -71,6 +71,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
   it("rejects ordinary Telegram messages until both pairing and message access are enabled", async () => {
     if (!db) throw new Error("BRAIKER_TEST_DATABASE_URL is required");
     const sent: string[] = [];
+    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramManagerEnabled: true } });
     const api: TelegramApi = {
       getUpdates: async () => [{ updateId: "202", chatId: "unpaired-chat", text: "/status" }],
       sendMessage: async (_chatId, text) => { sent.push(text); }
@@ -91,7 +92,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
         mustChangePassword: false
       }
     });
-    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramReceiveMessages: true } });
+    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramManagerEnabled: true, telegramReceiveMessages: true } });
     await db.telegramManagerSession.create({ data: { scope: "global", telegramChatId: "paired-chat", userId: user.id, linkedAt: new Date() } });
     const sent: string[] = [];
     const api: TelegramApi = {
@@ -117,7 +118,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
     const user = await db.user.create({ data: { email: `telegram-manager-test-${crypto.randomUUID()}@example.test`, passwordHash: "not-a-real-password", role: "ADMIN", mustChangePassword: false } });
     const wallet = await db.wallet.create({ data: { name: `telegram-manager-wallet-${crypto.randomUUID()}`, managedCapital: "100", unallocatedCapital: "100" } });
     const bot = await db.botInstance.create({ data: { walletId: wallet.id, name: "Juan trAIder", riskPolicy: {}, strategyProfile: {}, currentCapital: "10", initialCapital: "10", runMode: "OFF", status: "PAUSED", killSwitch: true } });
-    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramReceiveMessages: true } });
+    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramManagerEnabled: true, telegramReceiveMessages: true } });
     await db.telegramManagerSession.create({ data: { scope: "global", telegramChatId: "paired-chat", userId: user.id, linkedAt: new Date() } });
     const sent: string[] = [];
     const api: TelegramApi = { getUpdates: async () => [{ updateId: "404", chatId: "paired-chat", text: "activate bot Juan trAIder" }], sendMessage: async (_chatId, text) => { sent.push(text); } };
@@ -144,6 +145,7 @@ describeMysql("Telegram Bot Manager persistence (MySQL)", () => {
         mustChangePassword: false
       }
     });
+    await db.notificationSettings.create({ data: { scope: "global", webhookEvents: [], emailRecipients: [], emailEvents: [], telegramEvents: [], telegramManagerEnabled: true } });
     await db.telegramManagerSession.create({ data: { scope: "global", telegramChatId: "paired-chat", userId: user.id, linkedAt: new Date() } });
     const operations = await ensureOperationsSession(user.id, db);
     const sent: Array<{ chatId: string; text: string }> = [];

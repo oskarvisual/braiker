@@ -5,6 +5,7 @@ import {
   mirrorWebManagerExchangeToTelegram,
   parseTelegramConfirmation,
   parseTelegramControlCommand,
+  pollTelegramBotManager,
   redactTelegramOutboundContent,
   redactTelegramInboundContent
 } from "./bot-manager";
@@ -39,6 +40,7 @@ describe("Telegram Bot Manager", () => {
     const sent: Array<{ chatId: string; text: string }> = [];
     const created: unknown[] = [];
     const db = {
+      notificationSettings: { findUnique: async () => ({ telegramManagerEnabled: true }) },
       telegramManagerSession: { findUnique: async () => ({ telegramChatId: "paired-chat", userId: "admin-1" }) },
       managerChatSession: { upsert: async () => ({ id: "operations-1" }) },
       telegramManagerMessage: { create: async ({ data }: { data: unknown }) => { created.push(data); return data; } }
@@ -65,6 +67,7 @@ describe("Telegram Bot Manager", () => {
   it("does not mirror a regular browser conversation to Telegram", async () => {
     const sendMessage = async () => { throw new Error("Telegram must not be called"); };
     const db = {
+      notificationSettings: { findUnique: async () => ({ telegramManagerEnabled: true }) },
       telegramManagerSession: { findUnique: async () => ({ telegramChatId: "paired-chat", userId: "admin-1" }) },
       managerChatSession: { upsert: async () => ({ id: "operations-1" }) },
       telegramManagerMessage: { create: async () => { throw new Error("Telegram must not be persisted"); } }
@@ -80,5 +83,37 @@ describe("Telegram Bot Manager", () => {
       token: "synthetic-test-token",
       api: { getUpdates: async () => [], sendMessage }
     })).resolves.toEqual({ mirrored: false });
+  });
+
+  it("does not mirror a web Manager exchange while the persisted master switch is off", async () => {
+    const db = {
+      notificationSettings: { findUnique: async () => ({ telegramManagerEnabled: false }) },
+      telegramManagerSession: { findUnique: async () => { throw new Error("Pairing must not be read while disabled"); } }
+    };
+
+    await expect(mirrorWebManagerExchangeToTelegram({
+      userId: "admin-1",
+      sessionId: "operations-1",
+      content: "A web-only question",
+      reply: "A web-only reply"
+    }, {
+      db: db as never,
+      token: "synthetic-test-token",
+      api: { getUpdates: async () => [], sendMessage: async () => { throw new Error("Telegram must not receive a mirror while disabled"); } }
+    })).resolves.toEqual({ mirrored: false });
+  });
+
+  it("does not poll Telegram while the persisted master switch is off, even when a token exists", async () => {
+    const getUpdates = async () => { throw new Error("Telegram must not be polled while disabled"); };
+    const db = {
+      notificationSettings: { findUnique: async () => ({ telegramManagerEnabled: false }) },
+      telegramRuntimeState: { findUnique: async () => { throw new Error("Runtime state must not be read while disabled"); } }
+    };
+
+    await expect(pollTelegramBotManager(new Date("2026-08-22T16:00:00.000Z"), {
+      db: db as never,
+      token: "synthetic-test-token",
+      api: { getUpdates, sendMessage: async () => undefined }
+    })).resolves.toEqual({ processed: 0 });
   });
 });
