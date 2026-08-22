@@ -11,6 +11,10 @@ const proposal = { symbol: "NVDA", action: "BUY" as const, orderType: "MARKET" a
 describe("assessRisk", () => {
   it("approves a valid paper order", () => expect(assessRisk(proposal, context, DEFAULT_RISK_POLICY)).toMatchObject({ approved: true, reason: "APPROVED" }));
   it("always rejects when the kill switch is enabled", () => expect(assessRisk(proposal, { ...context, killSwitch: true }, DEFAULT_RISK_POLICY)).toMatchObject({ approved: false, reason: "KILL_SWITCH" }));
+  it("blocks only new buys during an active high-impact macro-event window", () => {
+    expect(assessRisk(proposal, { ...context, macroGuard: { active: true, eventTitle: "US CPI release" } }, DEFAULT_RISK_POLICY)).toMatchObject({ approved: false, reason: "MACRO_EVENT_GUARD" });
+    expect(assessRisk({ ...proposal, action: "SELL" }, { ...context, macroGuard: { active: true, eventTitle: "US CPI release" }, positions: [{ symbol: "NVDA", quantity: "1", marketValue: "5", averageEntryPrice: "5" }] }, DEFAULT_RISK_POLICY)).toMatchObject({ approved: true, reason: "APPROVED" });
+  });
   it("rejects a position above the policy limit", () => expect(assessRisk({ ...proposal, estimatedPrice: "11" }, context, DEFAULT_RISK_POLICY)).toMatchObject({ approved: false, reason: "MAX_POSITION_SIZE" }));
   it("rejects an order that exceeds the bot's own isolated budget", () => expect(assessRisk(proposal, { ...context, botCapitalAvailable: "4" }, DEFAULT_RISK_POLICY)).toMatchObject({ approved: false, reason: "BOT_BUDGET_AVAILABLE" }));
 });

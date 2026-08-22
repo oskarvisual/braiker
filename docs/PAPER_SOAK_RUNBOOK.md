@@ -40,6 +40,7 @@ This runbook is for the Personal Paper deployment only. It is never a checklist 
 8. If AI is enabled, confirm it is configured with a small per-bot daily cap, inspect one completed or failed advisory record in the Decision report, and verify that provider failure did not grant an approval or bypass risk.
 9. In Settings, select `System status failure` and `OpenAI quota exhausted` for each alert channel you intend to use. Confirm the destination and SMTP configuration are correct before relying on them. Repeated failures are de-duplicated and failed deliveries retry after a bounded delay. Configure an independent uptime monitor to poll public `/api/status` once a minute: a stopped worker or unavailable database cannot send its own webhook/email alert.
 10. On the next exchange day after 08:30 ET, open **Resources** and expand the daily briefing. Confirm it records the cited sources and shows one immutable recommendation set for every living bot. A recommendation may only caution or defer an optional AI advisory; confirm the deterministic signal, risk limits, position size, and order path remain unchanged.
+11. In Settings, record the upcoming official high-impact releases (for example, CPI, employment, PCE, GDP, and FOMC) with their release timestamps and source URLs. During a release-window test, confirm the Decision report rejects a new BUY with `MACRO_EVENT_GUARD` while a valid SELL remains eligible to reduce exposure.
 
 ## Daily checks during the soak
 

@@ -26,6 +26,7 @@ export type RiskContext = {
   weeklyPnl: string;
   tradesToday: number;
   botCapitalAvailable: string;
+  macroGuard?: { active: boolean; eventTitle?: string };
 };
 
 export type RiskCheck = { rule: string; passed: boolean; detail: string };

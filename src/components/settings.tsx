@@ -10,6 +10,7 @@ type NotificationSettings = { webhook: { enabled: boolean; configured: boolean; 
 type NotificationEvent = { id: string; label: string; description: string };
 type BotProfile = { id: string; name: string; description: string; avatar: string; riskPolicy: { maxPositionSize: string; maxDailyLoss: string; maxTradesPerDay: number } };
 type NotificationChannelId = "webhook" | "email" | "telegram";
+type MacroEvent = { id: string; provider: string; title: string; impact: string; startsAt: string; sourceUrl: string };
 
 function NotificationChannel({ id, title, isOpen, onToggle, children }: { id: NotificationChannelId; title: string; isOpen: boolean; onToggle: () => void; children: ReactNode }) {
   return <section className="notificationChannel">
@@ -35,7 +36,7 @@ function humanError(code: string) {
   return code || "Please try again.";
 }
 
-export function Settings({ initialWallets, initialPaperCapital, initialSync, initialNotifications, notificationEvents, botProfiles: initialBotProfiles }: { initialWallets: Wallet[]; initialPaperCapital: PaperCapital; initialSync: SyncSettings; initialNotifications: NotificationSettings; notificationEvents: readonly NotificationEvent[]; botProfiles: BotProfile[] }) {
+export function Settings({ initialWallets, initialPaperCapital, initialSync, initialNotifications, notificationEvents, botProfiles: initialBotProfiles, initialMacroEvents }: { initialWallets: Wallet[]; initialPaperCapital: PaperCapital; initialSync: SyncSettings; initialNotifications: NotificationSettings; notificationEvents: readonly NotificationEvent[]; botProfiles: BotProfile[]; initialMacroEvents: MacroEvent[] }) {
   const [wallets, setWallets] = useState(initialWallets);
   const [botProfiles, setBotProfiles] = useState(initialBotProfiles);
   const [paperCapital, setPaperCapital] = useState(initialPaperCapital);
@@ -56,6 +57,10 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
   const [profileDailyLoss, setProfileDailyLoss] = useState("");
   const [profileTrades, setProfileTrades] = useState("");
   const [saving, setSaving] = useState(false);
+  const [macroEvents, setMacroEvents] = useState(initialMacroEvents);
+  const [macroTitle, setMacroTitle] = useState("");
+  const [macroStartsAt, setMacroStartsAt] = useState("");
+  const [macroSourceUrl, setMacroSourceUrl] = useState("https://www.bls.gov/");
   const { pushToast } = useToast();
 
   function closeWalletModal() { setShowWalletModal(false); setWalletName(""); setWalletCapital("100"); }
@@ -129,6 +134,20 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
     closeProfileModal();
     pushToast({ tone: "success", title: `${body.name} defaults saved`, message: "New bots and future edits may use these configured caps." });
   }
+  async function addMacroEvent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setSaving(true);
+    const response = await fetch("/api/settings/macro-events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: macroTitle, impact: "HIGH", startsAt: new Date(macroStartsAt).toISOString(), sourceUrl: macroSourceUrl }) });
+    const body = await response.json(); setSaving(false);
+    if (!response.ok) { pushToast({ tone: "error", title: "Macro event was not saved", message: humanError(body.error) }); return; }
+    setMacroEvents((current) => [...current, body].sort((left, right) => left.startsAt.localeCompare(right.startsAt))); setMacroTitle(""); setMacroStartsAt("");
+    pushToast({ tone: "success", title: "High-impact macro event saved", message: "New BUYs will be blocked from 10 minutes before through 15 minutes after it." });
+  }
+  async function removeMacroEvent(event: MacroEvent) {
+    setSaving(true);
+    const response = await fetch(`/api/settings/macro-events/${event.id}`, { method: "DELETE" }); setSaving(false);
+    if (!response.ok) { pushToast({ tone: "error", title: "Macro event was not removed", message: "Please try again." }); return; }
+    setMacroEvents((current) => current.filter((entry) => entry.id !== event.id));
+  }
 
   return <>
     <header><div><p className="eyebrow">SYSTEM CONFIGURATION</p><h1>Settings</h1><p className="pageLead">One global Alpaca Paper account, virtual portfolios, safe automation and alert destinations.</p></div></header>
@@ -136,6 +155,7 @@ export function Settings({ initialWallets, initialPaperCapital, initialSync, ini
       <section className="panel settingsPanel"><div className="panelHeading"><div><p className="eyebrow">GLOBAL PAPER CAPITAL</p><h2>Virtual capital pool</h2></div><button className="compactButton" onClick={() => setShowWalletModal(true)}>Add wallet</button></div><p className="muted">Alpaca credentials are server-only environment variables. Wallets below are virtual portfolios that share this one Paper account; creating one never transfers money at Alpaca.</p><div className="paperCapitalStats"><span><small>Enabled in BrAIker</small><strong>${paperCapital.managedCapital}</strong></span><span><small>Assigned to wallets</small><strong>${paperCapital.allocatedCapital}</strong></span><span><small>Available to assign</small><strong>${paperCapital.availableCapital}</strong></span></div><form className="settingsControl" onSubmit={savePaperCapital}><label>Global Paper capital (USD)<input type="number" min="0" step="0.01" value={managedCapital} onChange={(event) => setManagedCapital(event.target.value)} required /></label><small className="muted">This is BrAIker’s safety envelope. It may not exceed the cash reported by the one Alpaca Paper account.</small><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save global capital"}</button></form><div className="walletSettingsList">{wallets.map((wallet) => <article key={wallet.id}><div><strong>{wallet.name}</strong><small>{wallet.currency} · ${wallet.unallocatedCapital} unassigned of ${wallet.managedCapital}</small></div><div className="walletActions"><span className="connectionStatus connected">Global Paper account</span><button type="button" className="secondaryButton" onClick={() => openCapitalModal(wallet)}>Manage budget</button></div></article>)}</div></section>
       <section className="panel settingsPanel"><div><p className="eyebrow">AUTOMATION</p><h2>Portfolio synchronization</h2></div><p className="muted">The worker reconciles the one Paper account, positions and orders on this schedule. Manual sync remains available from the dashboard.</p><form className="settingsControl" onSubmit={saveSync}><label className="toggleRow"><input type="checkbox" checked={sync.enabled} onChange={(event) => setSync((current) => ({ ...current, enabled: event.target.checked }))} /><span><strong>Automatic sync</strong><small>Run global reconciliation in the background.</small></span></label><label>Frequency<select value={sync.intervalMinutes} onChange={(event) => setSync((current) => ({ ...current, intervalMinutes: Number(event.target.value) }))} disabled={!sync.enabled}>{[1, 5, 15, 30, 60].map((minutes) => <option key={minutes} value={minutes}>Every {minutes} {minutes === 1 ? "minute" : "minutes"}</option>)}</select></label><small className="muted">Timezone: {sync.timezone}. Changes apply on the next worker minute.</small><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save synchronization"}</button></form></section>
     </div>
+    <section className="panel settingsPanel macroCalendarPanel"><div><p className="eyebrow">MACRO SAFETY GUARD</p><h2>High-impact economic calendar</h2><p className="muted">Use official HTTPS sources for releases such as CPI, employment, PCE, GDP, or FOMC. The worker blocks new BUYs 10 minutes before through 15 minutes after each high-impact event; SELLs remain available to reduce risk.</p></div><form className="settingsControl" onSubmit={addMacroEvent}><label>Event title<input value={macroTitle} onChange={(event) => setMacroTitle(event.target.value)} minLength={2} maxLength={255} placeholder="US CPI release" required /></label><label>Start time (your local time)<input type="datetime-local" value={macroStartsAt} onChange={(event) => setMacroStartsAt(event.target.value)} required /></label><label>Official source URL<input type="url" value={macroSourceUrl} onChange={(event) => setMacroSourceUrl(event.target.value)} required /></label><button type="submit" disabled={saving}>{saving ? "Saving…" : "Add high-impact event"}</button></form><div className="walletSettingsList">{macroEvents.length ? macroEvents.map((event) => <article key={event.id}><div><strong>{event.title}</strong><small>{new Date(event.startsAt).toLocaleString()} · {event.provider} · {event.impact}</small></div><div className="walletActions"><a className="secondaryButton" href={event.sourceUrl} target="_blank" rel="noreferrer">Source ↗</a><button type="button" className="secondaryButton" disabled={saving} onClick={() => void removeMacroEvent(event)}>Remove</button></div></article>) : <p className="muted">No upcoming high-impact events are recorded. Add the official releases before enabling a bot.</p>}</div></section>
     <section className="panel settingsPanel notificationPanel"><div><p className="eyebrow">NOTIFICATIONS</p><h2>Alerts, reports and Telegram</h2><p className="muted">Choose which operating alerts and Bot Manager reports should notify you. Webhook URLs are encrypted at rest and Telegram secrets remain server-only.</p></div><form className="notificationForm" onSubmit={saveNotifications}>
       <NotificationChannel id="webhook" title="Webhook alerts" isOpen={openNotificationChannel === "webhook"} onToggle={() => toggleNotificationChannel("webhook")}>
         <label className="toggleRow"><input type="checkbox" checked={notifications.webhook.enabled} onChange={(event) => setNotifications((current) => ({ ...current, webhook: { ...current.webhook, enabled: event.target.checked } }))} /><span><strong>Enable webhook alerts</strong><small>{notifications.webhook.configured ? "A secure destination is saved. Enter a URL below only to replace it." : "Use an HTTPS endpoint from Slack, Discord, Zapier, or your own service."}</small></span></label>

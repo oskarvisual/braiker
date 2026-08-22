@@ -18,6 +18,7 @@ import { sizePosition } from "@/modules/strategy/position-sizing";
 import { evaluateTrendStrategy, type StrategyProfile } from "@/modules/strategy/trend-strategy";
 import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
+import { activeMacroGuard } from "@/modules/resources/macro-guard";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -173,6 +174,12 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
       return "ai-rejected";
     }
     const pending = await prisma.tradeProposal.findMany({ where: { botId: input.bot.id, symbol: input.symbol, status: { in: ["RISK_APPROVED", "SUBMITTED"] } }, select: { symbol: true } });
+    const macroNow = new Date();
+    const macroEvents = await prisma.macroCalendarEvent.findMany({
+      where: { impact: "HIGH", startsAt: { gte: new Date(macroNow.getTime() - 15 * 60_000), lte: new Date(macroNow.getTime() + 10 * 60_000) } },
+      select: { id: true, title: true, impact: true, startsAt: true, sourceUrl: true }
+    });
+    const macroGuard = activeMacroGuard(macroEvents, macroNow);
     const tradesToday = await prisma.tradeProposal.count({ where: { botId: input.bot.id, action: { not: TradeAction.HOLD }, createdAt: { gte: new Date(new Date().setUTCHours(0, 0, 0, 0)) } } });
     const pnl = await realizedPnlWindows(prisma.fill, input.bot.id);
     const result = await recordProposedTrade({
@@ -194,7 +201,8 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
         dailyPnl: pnl.dailyPnl,
         weeklyPnl: pnl.weeklyPnl,
         tradesToday,
-        botCapitalAvailable: input.bot.currentCapital.minus(input.bot.reservedCapital).toString()
+        botCapitalAvailable: input.bot.currentCapital.minus(input.bot.reservedCapital).toString(),
+        macroGuard
       }
     });
     await prisma.marketEvaluation.update({ where: { evaluationKey }, data: { status: result.decision.approved ? "RISK_APPROVED" : `RISK_${result.decision.reason}`, completedAt: new Date() } });

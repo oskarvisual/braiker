@@ -12,6 +12,7 @@ export function assessRisk(proposal: TradeProposalInput, context: RiskContext, p
   check("KILL_SWITCH", !context.killSwitch, context.killSwitch ? "Trading is explicitly stopped" : "Execution enabled");
   check("BOT_STATE", context.botStatus === "RUNNING", `Bot status is ${context.botStatus}`);
   check("MARKET_OPEN", context.marketOpen, context.marketOpen ? "Regular market session" : "Market is closed");
+  check("MACRO_EVENT_GUARD", proposal.action !== "BUY" || !context.macroGuard?.active, context.macroGuard?.active ? `New positions are paused for ${context.macroGuard.eventTitle ?? "a high-impact macro event"}` : "No active high-impact macro-event window");
   check("FRESH_MARKET_DATA", context.dataFresh, context.dataFresh ? "Market data is fresh" : "Market data is stale");
   check("BROKER_HEALTH", context.accountHealthy && !context.account.tradingBlocked, "Broker account is available for trading");
   check("ORDER_QUANTITY", money(proposal.quantity).gt(0), "Quantity must be positive");
