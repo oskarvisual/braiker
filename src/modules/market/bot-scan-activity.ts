@@ -55,7 +55,7 @@ export function buildBotScanActivity(input: { state: "COMPLETED" | "MARKET_CLOSE
   return { status: "COMPLETED", reason: "ANALYZED", message: summary(outcomes), outcomes };
 }
 
-/** Keeps overnight/no-symbol activity useful without generating minute-by-minute noise. */
+/** Rate-limits skipped activity that is not covered by the durable market-close deferment. */
 export function shouldRecordSkippedActivity(input: { lastReason?: string | null; lastStartedAt?: Date | null; reason: "MARKET_CLOSED" | "NO_SYMBOLS"; now: Date }) {
   if (!input.lastStartedAt || input.lastReason !== input.reason) return true;
   return input.now.getTime() - input.lastStartedAt.getTime() >= 60 * 60_000;

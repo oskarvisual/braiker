@@ -20,6 +20,7 @@ import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { activeMacroGuard } from "@/modules/resources/macro-guard";
 import { appendCautiousDailyContext } from "@/modules/bot-chat/daily-chat-context";
+import { marketCycleResumeAt } from "@/modules/scheduler/schedule-policy";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -99,6 +100,16 @@ async function recordSkippedBotScan(botId: string, state: "MARKET_CLOSED" | "NO_
   const latest = await prisma.botScanRun.findFirst({ where: { botId }, orderBy: { startedAt: "desc" }, select: { reason: true, startedAt: true } });
   if (!shouldRecordSkippedActivity({ lastReason: latest?.reason, lastStartedAt: latest?.startedAt, reason: state, now })) return;
   await recordBotScan(botId, buildBotScanActivity({ state, outcomes: [] }), now);
+}
+
+type MarketCycleScheduleDb = Pick<typeof prisma, "scheduledTask">;
+
+export async function scheduleMarketCycleResume(nextRunAt: Date | null, db: MarketCycleScheduleDb = prisma) {
+  if (nextRunAt) {
+    await db.scheduledTask.update({ where: { name: "market-cycle" }, data: { nextRunAt } });
+    return;
+  }
+  await db.scheduledTask.updateMany({ where: { name: "market-cycle", nextRunAt: { not: null } }, data: { nextRunAt: null } });
 }
 
 async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle: MarketBar; quote: { bid: string; ask: string; timestamp: Date; feed: string }; marketBars: Map<string, MarketBar[]>; marketOpen: boolean; account: { cash: string; equity: string } }) {
@@ -225,9 +236,11 @@ export async function processMarketCycle() {
   let evaluations = 0;
   const clock = await globalPaperBroker().getClock();
   if (!clock.isOpen) {
+    await scheduleMarketCycleResume(marketCycleResumeAt(clock));
     await Promise.all(bots.map((bot) => recordSkippedBotScan(bot.id, "MARKET_CLOSED").catch((error) => logger.warn({ err: error, botId: bot.id }, "Unable to record market-closed bot activity"))));
     return { activeBots: bots.length, storedBars, evaluations };
   }
+  await scheduleMarketCycleResume(null);
   const sync = await syncGlobalPaperAccount();
   const market = new AlpacaMarketDataAdapter(globalPaperCredentials());
   const symbols = new Set(["SPY", "QQQ", ...bots.flatMap((bot: ActiveBot) => bot.watchlist.map((item) => item.symbol))]);

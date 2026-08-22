@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { JobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { isTaskRunDue } from "@/modules/scheduler/schedule-policy";
 
 const LEASE_MS = 60_000;
 const LEASE_RECOVERY_MAX_ATTEMPTS = 3;
@@ -34,7 +35,7 @@ export async function ensureTask(name: string, cronExpression: string, timezone 
 
 export async function runTask(taskName: string, handler: () => Promise<void>) {
   const task = await prisma.scheduledTask.findUnique({ where: { name: taskName } });
-  if (!task?.enabled) return;
+  if (!task?.enabled || !isTaskRunDue(task.nextRunAt)) return;
   const scheduledFor = new Date(Math.floor(Date.now() / 60_000) * 60_000);
   const run = await prisma.jobRun.upsert({
     where: { taskId_scheduledFor: { taskId: task.id, scheduledFor } },

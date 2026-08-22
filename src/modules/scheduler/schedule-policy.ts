@@ -18,3 +18,13 @@ export function isIntervalCronDue(expression: string, now: Date): boolean {
   if (!interval) return false;
   return interval === 60 ? now.getUTCMinutes() === 0 : now.getUTCMinutes() % interval === 0;
 }
+
+/** A durable task with a future resume time is intentionally not due yet. */
+export function isTaskRunDue(nextRunAt: Date | null, now = new Date()) {
+  return !nextRunAt || nextRunAt.getTime() <= now.getTime();
+}
+
+/** Alpaca's exchange-aware next_open covers weekends, holidays, and early sessions. */
+export function marketCycleResumeAt(clock: { isOpen: boolean; nextOpen: Date }) {
+  return clock.isOpen ? null : clock.nextOpen;
+}
