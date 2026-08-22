@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWalletRole } from "@/modules/auth/session";
 import { Prisma } from "@prisma/client";
 import { DEFAULT_RISK_POLICY } from "@/modules/risk/types";
-import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
+import { assertGloballyEnabledSymbols } from "@/modules/watchlist/asset-universe";
 import { validateBudgetAllocation } from "@/modules/capital/capital-policy";
 import { applyBotRiskLimits } from "@/modules/bots/bot-customization";
 import { getConfiguredBotTemplate } from "@/modules/bots/profile-defaults";
@@ -16,7 +16,7 @@ const createSchema = z.object({
   name: z.string().trim().min(2).max(120),
   templateId: z.enum(["GUARDIAN", "NAVIGATOR", "EXPLORER"]),
   budget: money,
-  symbols: z.array(z.enum(ALLOWED_TRADING_SYMBOLS)).min(1).max(ALLOWED_TRADING_SYMBOLS.length),
+  symbols: z.array(z.string().min(1).max(16)).min(1).max(50),
   customInstructions: z.string().trim().max(1200).optional(),
   riskLimits: z.object({ maxPositionSize: money.optional(), maxDailyLoss: money.optional(), maxTradesPerDay: z.number().int().min(1).optional() }).optional(),
   sourceBotId: z.string().uuid().optional()
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     const body = createSchema.safeParse(await request.json());
     if (!body.success) return NextResponse.json({ error: "Invalid bot" }, { status: 400 });
     const user = await requireWalletRole(body.data.walletId, ["ADMIN"]);
+    const symbols = await assertGloballyEnabledSymbols(body.data.symbols, prisma);
     if (body.data.sourceBotId) {
       const source = await prisma.botInstance.findUnique({ where: { id: body.data.sourceBotId }, select: { id: true } });
       if (!source) return NextResponse.json({ error: "CLONE_SOURCE_NOT_FOUND" }, { status: 400 });
@@ -52,8 +53,8 @@ export async function POST(request: Request) {
         currentCapital: budget,
         riskPolicy: riskPolicy ?? DEFAULT_RISK_POLICY,
         strategyProfile: { strategyId: "trend-v1", version: 1, templateId: template.id, customInstructions: body.data.customInstructions ?? "", ...template.strategyProfile },
-        watchlist: { create: body.data.symbols.map((symbol) => ({ symbol })) },
-        memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols: body.data.symbols, customInstructions: body.data.customInstructions ?? "", riskLimits: body.data.riskLimits ?? null } } }
+        watchlist: { create: symbols.map((symbol) => ({ symbol })) },
+        memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols, customInstructions: body.data.customInstructions ?? "", riskLimits: body.data.riskLimits ?? null } } }
       } });
       await tx.botCapitalEvent.create({ data: { botId: created.id, kind: "ALLOCATION", amount: budget, balanceAfter: budget, metadata: { source: "WALLET_UNALLOCATED_CAPITAL" } } });
       const updatedWallet = await tx.wallet.findUniqueOrThrow({ where: { id: body.data.walletId }, select: { unallocatedCapital: true } });

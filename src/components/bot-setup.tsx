@@ -11,7 +11,6 @@ import { BotSurvivalStatus } from "@/components/bot-survival-status";
 import { deriveBotSurvivalState } from "@/modules/bots/survival-state";
 import styles from "./bot-setup.module.css";
 
-const symbols = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AMD"] as const;
 type TemplateId = "GUARDIAN" | "NAVIGATOR" | "EXPLORER";
 type Bot = { id: string; name: string; templateId: string; avatarSeed: string; runMode: string; status: string; lifeStatus: "ACTIVE" | "DEAD"; initialCapital: string; currentCapital: string; reservedCapital: string; openPositionCount: number; killSwitch: boolean; symbols: string[]; customInstructions: string; riskPolicy: { maxPositionSize: string; maxDailyLoss: string; maxTradesPerDay: number }; lastAnalysis: { startedAt: string; status: string; message: string } | null };
 type Wallet = { id: string; name: string; currency: string; managedCapital: string; unallocatedCapital: string; bots: Bot[] };
@@ -30,7 +29,7 @@ function capitalFeedback(code: string | undefined, direction: "ADD" | "WITHDRAW"
   return direction === "ADD" ? "We could not add capital to this bot. Please try again." : "We could not withdraw capital from this bot. Please try again.";
 }
 
-export function BotSetup({ initialWallets, templates }: { initialWallets: Wallet[]; templates: Template[] }) {
+export function BotSetup({ initialWallets, templates, symbols }: { initialWallets: Wallet[]; templates: Template[]; symbols: string[] }) {
   const [wallets, setWallets] = useState(initialWallets);
   const [editorModal, setEditorModal] = useState<EditorModal>(null);
   const [capitalModal, setCapitalModal] = useState<CapitalModal>(null);
@@ -40,7 +39,7 @@ export function BotSetup({ initialWallets, templates }: { initialWallets: Wallet
   const [templateId, setTemplateId] = useState<TemplateId>("NAVIGATOR");
   const [botName, setBotName] = useState("");
   const [budget, setBudget] = useState("50");
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["SPY", "QQQ", "AAPL"]);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(symbols.filter((symbol) => ["SPY", "QQQ", "AAPL"].includes(symbol)));
   const [customInstructions, setCustomInstructions] = useState("");
   const [maxPositionSize, setMaxPositionSize] = useState("10");
   const [maxDailyLoss, setMaxDailyLoss] = useState("2");
@@ -59,7 +58,7 @@ export function BotSetup({ initialWallets, templates }: { initialWallets: Wallet
 
   function setProfileDefaults(id: TemplateId) { const profile = templates.find((template) => template.id === id)!.riskPolicy; setTemplateId(id); setMaxPositionSize(profile.maxPositionSize); setMaxDailyLoss(profile.maxDailyLoss); setMaxTradesPerDay(String(profile.maxTradesPerDay)); }
   function populateEditor(bot: Bot, targetWalletId: string) { setWalletId(targetWalletId); setTemplateId(bot.templateId as TemplateId); setBotName(bot.name); setCustomInstructions(bot.customInstructions); setMaxPositionSize(bot.riskPolicy.maxPositionSize); setMaxDailyLoss(bot.riskPolicy.maxDailyLoss); setMaxTradesPerDay(String(bot.riskPolicy.maxTradesPerDay)); setSelectedSymbols(bot.symbols); setConfirmDelete(false); }
-  function openCreate() { setWalletId(wallets[0]?.id ?? ""); setProfileDefaults("NAVIGATOR"); setBotName(""); setBudget("50"); setCustomInstructions(""); setSelectedSymbols(["SPY", "QQQ", "AAPL"]); setStep(1); setConfirmDelete(false); setEditorModal({ mode: "create" }); }
+  function openCreate() { setWalletId(wallets[0]?.id ?? ""); setProfileDefaults("NAVIGATOR"); setBotName(""); setBudget("50"); setCustomInstructions(""); setSelectedSymbols(symbols.filter((symbol) => ["SPY", "QQQ", "AAPL"].includes(symbol))); setStep(1); setConfirmDelete(false); setEditorModal({ mode: "create" }); }
   function openEdit(bot: Bot, targetWalletId: string) { if (bot.lifeStatus === "DEAD") return; populateEditor(bot, targetWalletId); setBudget(bot.currentCapital); setStep(1); setEditorModal({ mode: "edit", bot, walletId: targetWalletId }); }
   function openClone(source: Bot, sourceWalletId: string) { populateEditor(source, sourceWalletId); setBotName(`${source.name} copy`); setBudget(Number(source.currentCapital) > 0 ? source.currentCapital : "50"); setStep(2); setEditorModal({ mode: "clone", source }); }
   function closeEditor() { setEditorModal(null); setConfirmDelete(false); }

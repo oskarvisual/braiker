@@ -42,6 +42,10 @@ export class AlpacaPaperBrokerAdapter implements BrokerAdapter {
     return { buyingPower: account.buying_power, cash: account.cash, equity: account.equity, tradingBlocked: account.trading_blocked };
   }
 
+  async listUsEquities() {
+    return this.request<Array<{ symbol: string; name?: string; class: string; exchange: string; status: string; tradable: boolean }>>("/v2/assets?status=active&asset_class=us_equity");
+  }
+
   async getPositions(): Promise<BrokerPosition[]> {
     const positions = await this.request<Array<{ symbol: string; qty: string; market_value: string; avg_entry_price: string }>>("/v2/positions");
     return positions.map((position) => ({ symbol: position.symbol, quantity: position.qty, marketValue: position.market_value, averageEntryPrice: position.avg_entry_price }));

@@ -3,8 +3,7 @@ import { z } from "zod";
 import { assertSameOrigin } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/modules/auth/session";
-import { normalizeEquitySymbol } from "@/modules/watchlist/symbol-policy";
-import { ALLOWED_TRADING_SYMBOLS } from "@/modules/bots/bot-templates";
+import { assertGloballyEnabledSymbols, normalizeUniverseSymbols } from "@/modules/watchlist/asset-universe";
 
 const addSchema = z.object({ symbol: z.string().min(1).max(32) });
 
@@ -32,9 +31,9 @@ export async function POST(request: Request, context: { params: Promise<{ botId:
     if (user.role !== "ADMIN" && bot.wallet.members[0]?.role === "VIEWER") throw new Error("FORBIDDEN");
     const body = addSchema.safeParse(await request.json());
     if (!body.success) return NextResponse.json({ error: "INVALID_EQUITY_SYMBOL" }, { status: 400 });
-    const symbol = normalizeEquitySymbol(body.data.symbol);
+    const [symbol] = await assertGloballyEnabledSymbols([body.data.symbol], prisma);
     const count = await prisma.watchlist.count({ where: { botId, enabled: true } });
-    if (count >= ALLOWED_TRADING_SYMBOLS.length) return NextResponse.json({ error: "WATCHLIST_LIMIT_REACHED" }, { status: 400 });
+    if (count >= 50) return NextResponse.json({ error: "WATCHLIST_LIMIT_REACHED" }, { status: 400 });
     const item = await prisma.watchlist.upsert({ where: { botId_symbol: { botId, symbol } }, create: { botId, symbol }, update: { enabled: true } });
     await prisma.auditLog.create({ data: { userId: user.id, walletId: bot.walletId, action: "WATCHLIST_SYMBOL_ENABLED", target: symbol } });
     return NextResponse.json(item, { status: 201 });
@@ -47,7 +46,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ botI
     const { botId } = await context.params;
     const { user, bot } = await authorizedBot(botId);
     if (user.role !== "ADMIN" && bot.wallet.members[0]?.role === "VIEWER") throw new Error("FORBIDDEN");
-    const symbol = normalizeEquitySymbol(new URL(request.url).searchParams.get("symbol") ?? "");
+    const [symbol] = normalizeUniverseSymbols([new URL(request.url).searchParams.get("symbol") ?? ""]);
+    if (!symbol) throw new Error("INVALID_EQUITY_SYMBOL");
     await prisma.watchlist.update({ where: { botId_symbol: { botId, symbol } }, data: { enabled: false } });
     await prisma.auditLog.create({ data: { userId: user.id, walletId: bot.walletId, action: "WATCHLIST_SYMBOL_DISABLED", target: symbol } });
     return new NextResponse(null, { status: 204 });

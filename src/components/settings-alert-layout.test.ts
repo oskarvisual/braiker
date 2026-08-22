@@ -24,4 +24,12 @@ describe("settings alert layout", () => {
     expect(component).toContain('<NotificationChannel id="webhook"');
     expect(component).not.toContain('<details className="notificationChannel"');
   });
+
+  it("keeps channel headers compact instead of inheriting the primary action treatment", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(styles).toContain(".notificationChannelToggle { min-height:0 !important;");
+    expect(styles).toContain("background:#0d1620 !important;");
+    expect(styles).toContain(".notificationChannelContent { padding:16px 18px 18px !important;");
+  });
 });

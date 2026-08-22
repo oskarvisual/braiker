@@ -400,6 +400,24 @@ model Watchlist {
   @@index([symbol, enabled])
 }
 
+/// Server-synchronized Alpaca master list. `enabled` is the Admin's global
+/// universe gate; it is deliberately separate from each bot's watchlist.
+model TradableAsset {
+  id        String   @id @default(uuid()) @db.Char(36)
+  symbol    String   @unique @db.VarChar(16)
+  name      String   @db.VarChar(255)
+  exchange  String   @db.VarChar(32)
+  assetClass String  @db.VarChar(32)
+  active    Boolean  @default(true)
+  tradable  Boolean  @default(true)
+  enabled   Boolean  @default(false)
+  syncedAt  DateTime @db.DateTime(3)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+  @@index([enabled, active, tradable])
+  @@index([symbol, enabled])
+}
+
 model MarketBar {
   id        String   @id @default(uuid()) @db.Char(36)
   symbol    String   @db.VarChar(16)
