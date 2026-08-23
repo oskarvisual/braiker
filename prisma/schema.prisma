@@ -145,6 +145,7 @@ model User {
   resourceSources ResourceSource[]
   learnedInstructions BotLearnedInstruction[]
   macroCalendarEvents MacroCalendarEvent[]
+  resolvedLearningProposals BotLearningProposal[] @relation("LearningProposalResolver")
 }
 
 /// URL-only curated source registry. Source pages are untrusted input and
@@ -358,6 +359,7 @@ model BotInstance {
   dailyInputs    DailyBotInput[]
   dailyContexts  BotDailyContext[]
   learnedInstructions BotLearnedInstruction[]
+  learningProposals BotLearningProposal[]
   @@index([walletId, status])
   @@index([cloneSourceId])
 }
@@ -379,6 +381,27 @@ model BotLearnedInstruction {
   @@unique([botId, revision])
   @@index([botId, active, createdAt])
   @@index([createdById, createdAt])
+}
+
+/// A bot may suggest a bounded caution rule after deterministic evidence, but
+/// it can never activate the rule without an Admin resolution.
+model BotLearningProposal {
+  id           String      @id @default(uuid()) @db.Char(36)
+  botId        String      @db.Char(36)
+  dedupeKey    String      @unique @db.VarChar(191)
+  rule         String      @db.VarChar(1200)
+  evidence     Json
+  status       String      @default("PENDING") @db.VarChar(24)
+  delivery     String      @db.VarChar(24)
+  expiresAt    DateTime    @db.DateTime(3)
+  resolvedById String?     @db.Char(36)
+  resolvedAt   DateTime?   @db.DateTime(3)
+  createdAt    DateTime    @default(now()) @db.DateTime(3)
+  updatedAt    DateTime    @updatedAt @db.DateTime(3)
+  bot          BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  resolvedBy   User?       @relation("LearningProposalResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  @@index([botId, status, expiresAt])
+  @@index([resolvedById, createdAt])
 }
 
 model BotCapitalEvent {

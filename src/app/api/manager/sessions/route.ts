@@ -3,6 +3,7 @@ import { assertSameOrigin } from "@/lib/http";
 import { requireUser } from "@/modules/auth/session";
 import { createManagerConversation, listManagerConversations } from "@/modules/manager-chat/manager-chat-service";
 import { listPendingManagerActionProposals } from "@/modules/manager-chat/manager-action-proposals";
+import { listPendingLearningProposals } from "@/modules/bots/learning-proposal-service";
 import { prisma } from "@/lib/prisma";
 
 async function requireManagerUser() {
@@ -14,9 +15,10 @@ async function requireManagerUser() {
 export async function GET() {
   try {
     const user = await requireManagerUser();
-    const [sessions, actionProposals] = await Promise.all([
+    const [sessions, actionProposals, learningProposals] = await Promise.all([
       listManagerConversations(user.id, prisma),
-      listPendingManagerActionProposals(user.id, prisma)
+      listPendingManagerActionProposals(user.id, prisma),
+      listPendingLearningProposals(prisma)
     ]);
 
     return NextResponse.json(
@@ -35,7 +37,8 @@ export async function GET() {
             createdAt: message.createdAt.toISOString()
           }))
         })),
-        actionProposals: actionProposals.map((proposal) => ({ ...proposal, expiresAt: proposal.expiresAt.toISOString() }))
+        actionProposals: actionProposals.map((proposal) => ({ ...proposal, expiresAt: proposal.expiresAt.toISOString() })),
+        learningProposals: learningProposals.map((proposal) => ({ id: proposal.id, botName: proposal.bot.name, rule: proposal.rule, delivery: proposal.delivery, expiresAt: proposal.expiresAt.toISOString() }))
       },
       { headers: { "Cache-Control": "no-store" } }
     );

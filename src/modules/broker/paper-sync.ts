@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { globalPaperBroker, GLOBAL_PAPER_WALLET_ID } from "@/modules/broker/global-paper";
 import { applyBotFill, releaseBotReservation } from "@/modules/capital/fill-accounting";
+import { proposeLearningFromLoss } from "@/modules/bots/learning-proposal-service";
 
 type AlpacaOrderPayload = {
   symbol?: string; side?: string; type?: string; qty?: string; filled_qty?: string; filled_avg_price?: string | null; submitted_at?: string; filled_at?: string | null;
@@ -131,6 +132,9 @@ export async function reconcileBotOrder(tx: Prisma.TransactionClient, brokerOrde
   }
   await tx.order.update({ where: { id: order.id }, data: { status: orderStatus(brokerOrder.status), rawPayload: brokerOrder.raw as Prisma.InputJsonValue } });
   await tx.tradeProposal.update({ where: { id: proposal.id }, data: { status: brokerOrder.status === "filled" ? "FILLED" : brokerOrder.status === "rejected" ? "REJECTED" : "CANCELED" } });
+  if (delta.gt(0) && proposal.action === TradeAction.SELL && realizedPnl.lt(0)) {
+    await proposeLearningFromLoss({ botId: bot.id, botName: bot.name, walletId: bot.walletId, symbol: proposal.symbol }, tx);
+  }
 }
 
 export async function syncGlobalPaperAccount() {
