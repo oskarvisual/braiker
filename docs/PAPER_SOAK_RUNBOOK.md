@@ -7,6 +7,18 @@ This runbook is for the Personal Paper deployment only. It is never a checklist 
 1. Push the repository's `staging` branch before creating the App. App Platform must be granted access to that GitHub repository and the app must use [`../app.staging.yaml`](../app.staging.yaml), whose web service, worker, and `PRE_DEPLOY` migration job all track that branch.
 2. Create a dedicated DigitalOcean Managed MySQL database and a least-privilege application user. Enable backups and point-in-time recovery, then perform one restore test before enabling any bot. Do not reuse local or live databases.
 3. Add every `BRAIKER_*` placeholder referenced by the spec as an App Platform secret. Keep `TRADING_MODE=paper` and the fixed Alpaca Paper URL. Use staging-only session/encryption keys and Paper-only Alpaca credentials. Add `APP_ORIGIN` as an app-level non-secret with the exact public HTTPS origin and no trailing slash; this is required for browser CSRF validation through App Platform. Do not place any secret in Git, the spec, browser fields, or logs. For a one-time local migration/status check, place only the staging `DATABASE_URL` in the Git-ignored `.env.staging`; App Platform runtime secrets remain in the platform.
+
+## Manager-learning and macro-calendar staging smoke
+
+After the App Platform `PRE_DEPLOY` migration completes, sign in as an Admin and verify:
+
+1. Ask Bot Manager for market status. It must show Alpaca’s open/closed state and next open/close, or explicitly say the clock is unknown.
+2. Ask about one exact bot name. Confirm the reply can reference bounded persisted scans, proposals/risk decisions, orders/fills, and positions without exposing credentials.
+3. Send `Recordar para <nombre exacto>: esperar confirmación más fuerte`. Confirm an auditable internal revision exists, visible Additional instructions remain unchanged, and the same rule can be revoked through the protected learned-instructions endpoint.
+4. Add an active, approved MACRO Resource, then send `Evento macro: título | 2026-09-10T08:30:00-04:00 | https://host-aprobado/ruta`. Confirm the event is HIGH, source/actor audited, and duplicate or unapproved-host commands do not create events.
+5. In Settings, open **View calendar**, verify active/future and past pagination, and confirm neither view offers deletion. Set a longer protection window and verify it persists; values below 10/15 must be rejected.
+
+Keep the bot in Paper mode. A macro guard must reject only a new BUY; a reducing SELL remains permitted.
 4. Create one App Platform application from the spec. It provisions **one App**, with three components: public `web`, private `worker`, and the `PRE_DEPLOY` migration job. It does not create two separate applications. Keep `instance_count: 1` for both web and worker through the soak.
 5. Configure an independent external monitor to request the public `/api/status` endpoint once a minute and alert on any non-healthy response. App Platform liveness restarts the worker when `/healthz` fails; the external monitor is still required because a stopped worker or database cannot reliably send its own alert.
 6. After the first deployment, confirm the migration job succeeded, `/api/health`, `/api/ready`, and `/api/status` are healthy, then run the First-day verification below before turning on a bot.
