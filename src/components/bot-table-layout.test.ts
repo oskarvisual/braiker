@@ -15,4 +15,13 @@ describe("bot table layout", () => {
     expect(component).toContain("adaptiveRiskEnabled ? <p className=\"adaptiveRiskNotice\"");
     expect(component).toContain("Let this bot reduce its own limits to protect survival.");
   });
+
+  it("uses the compact selected-assets checkbox treatment for adaptive risk", () => {
+    const component = readFileSync(new URL("./bot-setup.tsx", import.meta.url), "utf8");
+    const styles = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+
+    expect(component).toContain('className={`adaptiveRiskToggle ${adaptiveRiskEnabled ? "enabled" : ""}`}');
+    expect(component).toContain('adaptiveRiskEnabled ? "Enabled" : "Disabled"');
+    expect(styles).toMatch(/\.modalCard \.adaptiveRiskToggle input\s*\{[^}]*appearance:auto;[^}]*width:17px;[^}]*height:17px;[^}]*accent-color:var\(--green\);/s);
+  });
 });

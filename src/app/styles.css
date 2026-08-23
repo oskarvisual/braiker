@@ -106,7 +106,7 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .notificationChannelContent .eventOptions > label { min-height:0; padding:11px 12px; }
 .macroCalendarPanel { margin-top:18px; padding:24px; }
 .macroCalendarPanel .settingsControl { gap:14px; margin-top:18px; }
-.adaptiveRiskToggle { margin-top:18px; }
+.modalCard .adaptiveRiskToggle { display:flex; align-items:flex-start; gap:10px; margin-top:18px; padding:11px; border:1px solid #263748; border-radius:9px; background:#0d1620; color:var(--text); cursor:pointer; }.modalCard .adaptiveRiskToggle.enabled { border-color:#3d8a66; background:#10231d; }.modalCard .adaptiveRiskToggle input { appearance:auto; width:17px; min-width:17px; min-height:17px; height:17px; margin:2px 0 0; padding:0; border:0; border-radius:0; background:transparent; accent-color:var(--green); box-shadow:none; }.modalCard .adaptiveRiskToggle > span { display:grid; min-width:0; gap:3px; }.modalCard .adaptiveRiskToggle strong { display:flex; align-items:center; flex-wrap:wrap; gap:7px; color:var(--text); }.modalCard .adaptiveRiskToggle small { color:var(--muted); font-size:.72rem; font-weight:400; line-height:1.35; }.adaptiveRiskState { padding:2px 6px; border:1px solid #40556c; border-radius:999px; color:#aabccc; font-size:.65rem; font-style:normal; letter-spacing:.04em; line-height:1.2; text-transform:uppercase; }.adaptiveRiskToggle.enabled .adaptiveRiskState { border-color:#3d8a66; color:#8ae0b3; }
 .adaptiveRiskNotice { margin:14px 0 0; padding:13px 14px; border:1px solid #406050; border-radius:10px; background:#10231d; color:#bdd6c7; line-height:1.45; }
 .macroCalendarOverlay { z-index:120; width:100vw; height:100vh; }
 .macroCalendarModal { width:min(100%,640px); }
