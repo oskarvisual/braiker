@@ -22,6 +22,7 @@ import { ensureDefaultResourceSources } from "@/modules/resources/resource-servi
 import { refreshDueResourceSources } from "@/modules/resources/resource-refresh";
 import { isSameNewYorkCalendarDay, newYorkMarketDate, publishDailyMarketBrief } from "@/modules/resources/daily-market-brief";
 import { publishDailyBotInputs } from "@/modules/resources/daily-bot-inputs";
+import { allocateMonthlyOperatingCosts } from "@/modules/capital/operating-cost-service";
 
 async function reconcilePortfolio() {
   await syncGlobalPaperAccount();
@@ -76,6 +77,7 @@ async function main() {
     ensureTask("bot-scan-retention", "15 0 * * *"),
     ensureTask("resource-refresh", "*/15 * * * *"),
     ensureTask("daily-market-brief", "30 8 * * 1-5", "America/New_York"),
+    ensureTask("monthly-operating-cost-allocation", "5 0 1 * *", "America/New_York"),
     ...managerReportSchedules.map((schedule) => ensureTask(schedule.taskName, schedule.cronExpression, schedule.timezone))
   ]);
   const marketStream = new AlpacaMarketStreamManager({
@@ -102,6 +104,7 @@ async function main() {
   cron.schedule("15 0 * * *", () => void runTask("bot-scan-retention", retainBotScanActivity), { timezone: "UTC" });
   cron.schedule("*/15 * * * *", () => void runTask("resource-refresh", async () => { await refreshDueResourceSources(); }), { timezone: "UTC" });
   cron.schedule("30 8 * * 1-5", () => void runTask("daily-market-brief", publishBriefIfMarketDay), { timezone: "America/New_York" });
+  cron.schedule("5 0 1 * *", () => void runTask("monthly-operating-cost-allocation", async () => { await allocateMonthlyOperatingCosts(); }), { timezone: "America/New_York" });
   cron.schedule("5 * * * * *", () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
   cron.schedule("*/30 * * * * *", () => void processOneExecutionJob(), { timezone: "UTC" });
   cron.schedule("*/10 * * * * *", () => void pollTelegramBotManager().catch((error) => logger.warn({ err: sanitizeTelegramError(error) }, "Telegram Bot Manager polling failed")), { timezone: "UTC" });
