@@ -4,15 +4,17 @@ import { ManagerChat } from "@/components/manager-chat";
 import { currentUser } from "@/modules/auth/session";
 import { listManagerConversations } from "@/modules/manager-chat/manager-chat-service";
 import { listPendingManagerActionProposals } from "@/modules/manager-chat/manager-action-proposals";
+import { listPendingLearningProposals } from "@/modules/bots/learning-proposal-service";
 import { prisma } from "@/lib/prisma";
 
 export default async function ManagerPage() {
   const user = await currentUser();
   if (!user) redirect("/login");
   if (user.role !== "ADMIN") redirect("/");
-  const [sessions, actionProposals] = await Promise.all([
+  const [sessions, actionProposals, learningProposals] = await Promise.all([
     listManagerConversations(user.id, prisma),
-    listPendingManagerActionProposals(user.id, prisma)
+    listPendingManagerActionProposals(user.id, prisma),
+    listPendingLearningProposals(prisma)
   ]);
   return <>
     <AppNavigation user={{ email: user.email, role: user.role }} />
@@ -24,7 +26,7 @@ export default async function ManagerPage() {
         pinned: session.pinned,
         updatedAt: session.updatedAt.toISOString(),
         messages: session.messages.map((message) => ({ id: message.id, role: message.role, source: message.source, content: message.content, createdAt: message.createdAt.toISOString() }))
-      }))} initialActionProposals={actionProposals.map((proposal) => ({ ...proposal, expiresAt: proposal.expiresAt.toISOString() }))} />
+      }))} initialActionProposals={actionProposals.map((proposal) => ({ ...proposal, expiresAt: proposal.expiresAt.toISOString() }))} initialLearningProposals={learningProposals.map((proposal) => ({ id: proposal.id, botName: proposal.bot.name, rule: proposal.rule, delivery: proposal.delivery as "WEB_CHAT" | "TELEGRAM" | "PENDING", expiresAt: proposal.expiresAt.toISOString() }))} />
     </main>
   </>;
 }

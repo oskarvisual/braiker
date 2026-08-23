@@ -13,6 +13,7 @@ describe("notification settings", () => {
     expect(notificationEvents.map((event) => event.id)).toContain("SYNC_FAILED");
     expect(notificationEvents.map((event) => event.id)).toContain("SYSTEM_STATUS_FAILURE");
     expect(notificationEvents.map((event) => event.id)).toContain("OPENAI_QUOTA_EXHAUSTED");
+    expect(notificationEvents.map((event) => event.id)).toContain("LEARNING_PROPOSAL");
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_DAILY_REPORT");
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_WEEKLY_REPORT");
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_MONTHLY_REPORT");

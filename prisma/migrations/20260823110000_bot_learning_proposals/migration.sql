@@ -1,0 +1,20 @@
+CREATE TABLE `BotLearningProposal` (
+  `id` CHAR(36) NOT NULL,
+  `botId` CHAR(36) NOT NULL,
+  `dedupeKey` VARCHAR(191) NOT NULL,
+  `rule` VARCHAR(1200) NOT NULL,
+  `evidence` JSON NOT NULL,
+  `status` VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  `delivery` VARCHAR(24) NOT NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `resolvedById` CHAR(36) NULL,
+  `resolvedAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `BotLearningProposal_dedupeKey_key`(`dedupeKey`),
+  INDEX `BotLearningProposal_botId_status_expiresAt_idx`(`botId`, `status`, `expiresAt`),
+  INDEX `BotLearningProposal_resolvedById_createdAt_idx`(`resolvedById`, `createdAt`),
+  CONSTRAINT `BotLearningProposal_botId_fkey` FOREIGN KEY (`botId`) REFERENCES `BotInstance`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `BotLearningProposal_resolvedById_fkey` FOREIGN KEY (`resolvedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -5,6 +5,7 @@ import { resolveManagerChatModel } from "@/modules/manager-chat/manager-chat";
 import { OpenAiManagerChat } from "@/modules/manager-chat/openai-manager-chat";
 import { ensureOperationsSession, sendManagerMessage, type ManagerResponder } from "@/modules/manager-chat/manager-chat-service";
 import { confirmManagerActionProposal, createManagerActionProposal, hashManagerConfirmationCode } from "@/modules/manager-chat/manager-action-proposals";
+import { parseLearningProposalResolution, resolveLearningProposal } from "@/modules/bots/learning-proposal-service";
 
 const SCOPE = "global";
 const PAIRING_TTL_MS = 10 * 60_000;
@@ -79,7 +80,7 @@ function telegramApi(token: string): TelegramApi {
 type TelegramDb = Pick<typeof prisma,
   "telegramRuntimeState" | "telegramPairingCode" | "telegramManagerSession" | "telegramManagerMessage" | "notificationSettings" |
   "managerChatSession" | "managerChatMessage" | "managerActionProposal" | "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" |
-  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "botLearnedInstruction" | "resourceSource" | "macroCalendarEvent" | "auditLog"
+  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "botLearnedInstruction" | "botLearningProposal" | "resourceSource" | "macroCalendarEvent" | "auditLog"
 >;
 
 /**
@@ -180,6 +181,21 @@ async function processUpdate(
       return true;
     } catch {
       const reply = "I could not prepare that change. Only the paired Admin may prepare a valid bot-control proposal.";
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
+      await api.sendMessage(update.chatId, reply);
+      return true;
+    }
+  }
+  const learningResolution = parseLearningProposalResolution(update.text);
+  if (learningResolution) {
+    try {
+      const result = await resolveLearningProposal({ proposalId: learningResolution.proposalId, userId: session.user.id, actorRole: session.user.role, action: learningResolution.action, now }, db);
+      const reply = learningResolution.action === "APPROVE" ? `Learning rule approved for ${result.botName}. It remains caution-only and cannot change trading authority.` : `Learning proposal rejected for ${result.botName}.`;
+      await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
+      await api.sendMessage(update.chatId, reply);
+      return true;
+    } catch {
+      const reply = "That learning proposal is invalid, expired, already resolved, or you are not allowed to resolve it.";
       await db.telegramManagerMessage.create({ data: { sessionScope: SCOPE, direction: "OUTBOUND", content: reply, createdAt: afterInboundMessage(now) } });
       await api.sendMessage(update.chatId, reply);
       return true;

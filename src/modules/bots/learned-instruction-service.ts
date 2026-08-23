@@ -9,7 +9,7 @@ type LearnedInstructionDb = {
 };
 
 /** A duplicate active rule is not another revision: it is an idempotent no-op. */
-export async function recordLearnedInstruction(input: { botId: string; userId: string; content: string; source: "MANAGER_CHAT" | "BOT_CHAT" | "CLONE"; walletId?: string }, db: LearnedInstructionDb) {
+export async function recordLearnedInstruction(input: { botId: string; userId: string; content: string; source: "MANAGER_CHAT" | "BOT_CHAT" | "CLONE" | "LEARNING_PROPOSAL"; walletId?: string }, db: LearnedInstructionDb) {
   const content = normalizeLearnedInstruction(input.content);
   const latest = await db.botLearnedInstruction.findFirst({ where: { botId: input.botId }, orderBy: { revision: "desc" }, select: { revision: true, content: true } });
   if (latest?.content === content) return { created: false, instruction: latest };

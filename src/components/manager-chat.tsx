@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 export type ManagerMessage = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; source: "WEB" | "TELEGRAM" | "TELEGRAM_ALERT" | "SYSTEM"; content: string; createdAt: string };
 export type ManagerSession = { id: string; title: string; kind: "OPERATIONS" | "CONVERSATION"; pinned: boolean; updatedAt: string; messages: ManagerMessage[] };
 export type ManagerActionProposal = { id: string; botName: string; action: "TURN_ON" | "TURN_OFF"; expiresAt: string };
+export type LearningProposal = { id: string; botName: string; rule: string; delivery: "WEB_CHAT" | "TELEGRAM" | "PENDING"; expiresAt: string };
 
 function labelForSource(source: ManagerMessage["source"]) {
   if (source === "TELEGRAM_ALERT") return "Telegram alert";
@@ -27,7 +28,7 @@ export function managerActionSummary(proposal: ManagerActionProposal) {
   return `This will ${operation} ${proposal.botName} in Paper mode. BrAIker will revalidate permissions, lifecycle state, risk status, and the Kill Switch when you confirm.`;
 }
 
-export function ManagerChat({ initialSessions, initialActionProposals = [] }: { initialSessions: ManagerSession[]; initialActionProposals?: ManagerActionProposal[] }) {
+export function ManagerChat({ initialSessions, initialActionProposals = [], initialLearningProposals = [] }: { initialSessions: ManagerSession[]; initialActionProposals?: ManagerActionProposal[]; initialLearningProposals?: LearningProposal[] }) {
   const { pushToast } = useToast();
   const [sessions, setSessions] = useState(initialSessions);
   const [selectedId, setSelectedId] = useState(initialSessions[0]?.id ?? "");
@@ -35,6 +36,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
   const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
   const [actionProposals, setActionProposals] = useState(initialActionProposals);
+  const [learningProposals, setLearningProposals] = useState(initialLearningProposals);
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null, [sessions, selectedId]);
   const composerRef = useAutoResizingComposer(draft);
 
@@ -43,12 +45,13 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
       headers: { accept: "application/json" },
       cache: "no-store"
     });
-    const payload = await response.json() as { sessions?: ManagerSession[]; actionProposals?: ManagerActionProposal[]; error?: string };
+    const payload = await response.json() as { sessions?: ManagerSession[]; actionProposals?: ManagerActionProposal[]; learningProposals?: LearningProposal[]; error?: string };
     if (!response.ok || !payload.sessions) throw new Error(payload.error ?? "MANAGER_SESSION_LIST_FAILED");
 
     setSessions(payload.sessions);
     setSelectedId((current) => synchronizeManagerSessions(current, payload.sessions ?? []).selectedId);
     setActionProposals(payload.actionProposals ?? []);
+    setLearningProposals(payload.learningProposals ?? []);
   }, []);
 
   useEffect(() => {
@@ -122,6 +125,20 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
     }
   }
 
+  async function resolveLearningProposal(proposal: LearningProposal, action: "APPROVE" | "REJECT") {
+    try {
+      const response = await fetch(`/api/manager/learning-proposals/${proposal.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }) });
+      const payload = await response.json() as { botName?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "LEARNING_PROPOSAL_RESOLUTION_FAILED");
+      pushToast({ tone: "success", title: action === "APPROVE" ? "Learning rule approved" : "Learning rule rejected", message: `${payload.botName ?? proposal.botName} was not given any trading authority.` });
+      setLearningProposals((current) => current.filter((item) => item.id !== proposal.id));
+      await refreshSessions();
+    } catch {
+      pushToast({ tone: "error", title: "Learning proposal could not be resolved", message: "It may have expired or already been resolved." });
+      await refreshSessions().catch(() => undefined);
+    }
+  }
+
   return <section className="managerChat">
     <header className="managerChatHeading">
       <div><p className="eyebrow">OPERATIONS ASSISTANT · CONFIRMATION REQUIRED</p><h1>Br<span>AI</span>ker</h1><p className="intro">Ask for explanations, or explicitly request “activate bot Name” / “turn off Name”. BrAIker prepares a Paper-only proposal and never applies it without your confirmation.</p></div>
@@ -143,6 +160,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [] }: { 
             {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small><p>{message.content}</p></article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
           </div>
           {actionProposals.map((actionProposal) => <aside className="managerActionProposal" aria-live="polite" key={actionProposal.id}><p className="eyebrow">PENDING POWER CHANGE</p><strong>{actionProposal.action === "TURN_ON" ? "Turn ON" : "Turn OFF"} · {actionProposal.botName}</strong><p>{managerActionSummary(actionProposal)}</p><div><small>Expires {new Date(actionProposal.expiresAt).toLocaleTimeString()}</small><button type="button" onClick={() => void confirmAction(actionProposal)}>Confirm change</button></div></aside>)}
+          {learningProposals.map((proposal) => <aside className="managerActionProposal" aria-live="polite" key={proposal.id}><p className="eyebrow">PENDING LEARNING PROPOSAL</p><strong>{proposal.botName}</strong><p>{proposal.rule}</p><small>Evidence was detected by the bot. This can only add cautious AI-review context; it cannot alter signals, capital, risk, size, or execution.</small><div><small>Expires {new Date(proposal.expiresAt).toLocaleString()}</small><button type="button" onClick={() => void resolveLearningProposal(proposal, "APPROVE")}>Approve rule</button><button type="button" className="secondaryButton" onClick={() => void resolveLearningProposal(proposal, "REJECT")}>Reject</button></div></aside>)}
           <form className="managerComposer" onSubmit={sendMessage}>
             <label htmlFor="manager-message">Message BrAIker</label>
             <div><textarea ref={composerRef} id="manager-message" rows={1} value={draft} maxLength={4000} onChange={(event) => setDraft(event.target.value)} placeholder="Why did the latest scan skip a trade?" disabled={sending} /><button type="submit" disabled={sending || !draft.trim()}>{sending ? "Thinking…" : "Send"}</button></div>

@@ -7,6 +7,7 @@ export const notificationEventIds = [
   "PORTFOLIO_DIVERGENCE",
   "SYSTEM_STATUS_FAILURE",
   "OPENAI_QUOTA_EXHAUSTED",
+  "LEARNING_PROPOSAL",
   "BOT_MANAGER_DAILY_REPORT",
   "BOT_MANAGER_WEEKLY_REPORT",
   "BOT_MANAGER_MONTHLY_REPORT"
@@ -21,6 +22,7 @@ export const notificationEvents = [
   { id: "PORTFOLIO_DIVERGENCE", label: "Portfolio divergence", description: "Reconciliation detects a material mismatch." },
   { id: "SYSTEM_STATUS_FAILURE", label: "System status failure", description: "A required service such as MySQL, the worker, the stream, or Alpaca needs attention." },
   { id: "OPENAI_QUOTA_EXHAUSTED", label: "OpenAI quota exhausted", description: "OpenAI rejected an advisory request because quota or billing is unavailable." },
+  { id: "LEARNING_PROPOSAL", label: "Learning proposals", description: "A bot detected repeated evidence and requests approval for a cautious internal rule." },
   { id: "BOT_MANAGER_DAILY_REPORT", label: "Daily Bot Manager report", description: "A daily paper-only summary of bots and order activity." },
   { id: "BOT_MANAGER_WEEKLY_REPORT", label: "Weekly Bot Manager report", description: "A weekly paper-only summary of bots and order activity." },
   { id: "BOT_MANAGER_MONTHLY_REPORT", label: "Monthly Bot Manager report", description: "A monthly paper-only summary of bots and order activity." },
