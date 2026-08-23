@@ -4,12 +4,16 @@ import { managerUnavailableReply, sanitizeManagerMessage } from "./manager-chat"
 import type { ManagerChatHistoryItem, ManagerChatRequest } from "./openai-manager-chat";
 import { prepareManagerPowerProposal } from "./manager-power-intents";
 import { createManagerBotChatNote } from "@/modules/bot-chat/bot-chat-service";
+import { createManagerMacroEvent } from "./manager-macro-event-service";
+import { parseManagerLearningCommand, recordLearnedInstruction } from "@/modules/bots/learned-instruction-service";
+import { globalPaperBroker } from "@/modules/broker/global-paper";
+import { managerMarketClockContext } from "./manager-market-context";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "botPosition" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext" | "botLearnedInstruction" | "resourceSource" | "macroCalendarEvent" | "auditLog">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
@@ -81,7 +85,7 @@ export async function appendManagerAlert(input: { userId: string; alertId: strin
   });
 }
 
-async function safeOperationalContext(db: ManagerChatDb) {
+async function safeOperationalContext(db: ManagerChatDb, message: string) {
   const bots = await db.botInstance.findMany({
     select: {
       id: true,
@@ -112,8 +116,17 @@ async function safeOperationalContext(db: ManagerChatDb) {
     _count: { _all: true }
   });
 
+  const normalizedMessage = normalizedBotName(message);
+  const namedBot = bots.find((bot) => {
+    const name = normalizedBotName(bot.name);
+    return new RegExp(`(?:^|[^a-z0-9])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z0-9])`, "i").test(normalizedMessage);
+  });
+  const detailed = namedBot ? await detailedBotContext(namedBot.id, db) : null;
+  let clock = null;
+  try { clock = await globalPaperBroker().getClock(); } catch { /* Unknown is safer than a guessed schedule. */ }
   return {
     generatedAt: new Date().toISOString(),
+    marketClock: managerMarketClockContext(clock),
     botCount: bots.length,
     proposalsByStatus: Object.fromEntries(proposalCounts.map((item) => [item.status, item._count._all])),
     bots: bots.map((bot) => {
@@ -127,7 +140,26 @@ async function safeOperationalContext(db: ManagerChatDb) {
         symbols: bot.watchlist.map((watch) => watch.symbol),
         lastScan: scan ? { status: scan.status, reason: scan.reason, startedAt: scan.startedAt.toISOString(), completedAt: scan.completedAt?.toISOString() ?? null } : null
       };
-    })
+    }),
+    namedBot: detailed
+  };
+}
+
+/** A named bot gets bounded evidence, never credentials, wallets, or mutable controls. */
+async function detailedBotContext(botId: string, db: ManagerChatDb) {
+  const [proposals, scans, positions] = await Promise.all([
+    db.tradeProposal.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 20, select: { symbol: true, action: true, status: true, estimatedPrice: true, createdAt: true, riskDecision: { select: { approved: true, reason: true, createdAt: true } } } }),
+    db.botScanRun.findMany({ where: { botId }, orderBy: { startedAt: "desc" }, take: 20, select: { status: true, reason: true, message: true, startedAt: true, completedAt: true } }),
+    db.botPosition.findMany({ where: { botId }, orderBy: { updatedAt: "desc" }, take: 50, select: { symbol: true, quantity: true, averageEntryPrice: true, updatedAt: true } })
+  ]);
+  const proposalIds = await db.tradeProposal.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true } });
+  const orders = proposalIds.length ? await db.order.findMany({ where: { proposalId: { in: proposalIds.map((proposal) => proposal.id) } }, orderBy: { createdAt: "desc" }, take: 20, select: { symbol: true, action: true, status: true, quantity: true, createdAt: true, fills: { select: { quantity: true, price: true, realizedPnl: true, filledAt: true }, take: 20 } } }) : [];
+  return {
+    botId,
+    orders: orders.map((order) => ({ ...order, quantity: decimalString(order.quantity), createdAt: order.createdAt.toISOString(), fills: order.fills.map((fill) => ({ quantity: decimalString(fill.quantity), price: decimalString(fill.price), realizedPnl: decimalString(fill.realizedPnl), filledAt: fill.filledAt.toISOString() })) })),
+    proposals: proposals.map((proposal) => ({ ...proposal, estimatedPrice: decimalString(proposal.estimatedPrice), createdAt: proposal.createdAt.toISOString(), riskDecision: proposal.riskDecision ? { ...proposal.riskDecision, createdAt: proposal.riskDecision.createdAt.toISOString() } : null })),
+    scans: scans.map((scan) => ({ ...scan, startedAt: scan.startedAt.toISOString(), completedAt: scan.completedAt?.toISOString() ?? null })),
+    positions: positions.map((position) => ({ ...position, quantity: decimalString(position.quantity), averageEntryPrice: decimalString(position.averageEntryPrice), updatedAt: position.updatedAt.toISOString() }))
   };
 }
 
@@ -149,6 +181,16 @@ async function prepareManagerBotNote(input: { userId: string; content: string },
   if (!bot) return { reply: `I could not find an exact bot named “${reference}”. No daily note was created.` };
   await createManagerBotChatNote({ userId: input.userId, botId: bot.id, content, title: "Bot Manager daily note" }, db);
   return { reply: `Created a local bot-chat session for ${bot.name} and added the note as cautious context for today only. It cannot create orders, change capital, risk, instructions, Kill Switch, or bot power.` };
+}
+
+async function prepareManagerLearnedInstruction(input: { userId: string; content: string }, db: ManagerChatDb) {
+  const command = parseManagerLearningCommand(input.content);
+  if (!command) return null;
+  const bots = await db.botInstance.findMany({ select: { id: true, name: true, walletId: true }, orderBy: { name: "asc" }, take: 100 });
+  const bot = bots.find((candidate) => normalizedBotName(candidate.name) === normalizedBotName(command.botName));
+  if (!bot) return { reply: `I could not find an exact bot named “${command.botName}”. No internal rule was recorded.` };
+  const result = await recordLearnedInstruction({ userId: input.userId, botId: bot.id, walletId: bot.walletId, content: command.content, source: "MANAGER_CHAT" }, db);
+  return { reply: result.created ? `Recorded internal caution rule revision ${result.instruction.revision} for ${bot.name}. It remains separate from Additional instructions and can only add caution or veto an AI review.` : `That exact internal rule is already the latest revision for ${bot.name}; no duplicate was recorded.` };
 }
 
 /**
@@ -201,6 +243,26 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
       await storeAssistantReply(session.id, note.reply, dependencies.db, replyReference);
       return { reply: note.reply, available: true };
     }
+    if (input.actorRole !== "ADMIN") {
+      const learning = parseManagerLearningCommand(content);
+      const macro = /^(?:evento\s+macro|macro\s+event)\s*:/i.test(content);
+      if (learning || macro) {
+        const reply = "Only an Admin may record internal learning or create macro-calendar events.";
+        await storeAssistantReply(session.id, reply, dependencies.db, replyReference);
+        return { reply, available: true };
+      }
+    } else {
+      const learning = await prepareManagerLearnedInstruction({ userId: input.userId, content }, dependencies.db);
+      if (learning) {
+        await storeAssistantReply(session.id, learning.reply, dependencies.db, replyReference);
+        return { reply: learning.reply, available: true };
+      }
+      const macro = await createManagerMacroEvent({ userId: input.userId, content, source: input.source ?? "WEB", sourceReference: input.sourceReference }, dependencies.db);
+      if (macro) {
+        await storeAssistantReply(session.id, macro.reply, dependencies.db, replyReference);
+        return { reply: macro.reply, available: true };
+      }
+    }
   }
 
   const aiState = await getAiRuntimeState(dependencies.db);
@@ -224,7 +286,7 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
   const history: ManagerChatHistoryItem[] = historyRows.reverse().map((row) => ({ role: row.role === "USER" ? "user" : "assistant", content: row.content }));
 
   try {
-    const reply = await dependencies.responder.reply({ message: content, history, context: await safeOperationalContext(dependencies.db) });
+    const reply = await dependencies.responder.reply({ message: content, history, context: await safeOperationalContext(dependencies.db, content) });
     await storeAssistantReply(session.id, reply, dependencies.db, replyReference);
     return { reply, available: true };
   } catch (error) {

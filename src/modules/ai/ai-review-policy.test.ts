@@ -11,8 +11,9 @@ describe("AI review eligibility", () => {
     expect(aiReviewEligibility({ enabled: true, analysesToday: 9, dailyLimit: 10 })).toEqual({ allowed: true, reason: null });
   });
 
-  it("uses only a bot's saved additional instruction in the advisory context", () => {
-    expect(sanitizedBotInstruction({ customInstructions: "Prioritize liquid ETFs." })).toBe("Prioritize liquid ETFs.");
+  it("labels the visible additional instruction as higher priority than learned caution", () => {
+    expect(sanitizedBotInstruction({ customInstructions: "Prioritize liquid ETFs." })).toContain("User-visible instruction (takes priority over internal learning):\nPrioritize liquid ETFs.");
+    expect(sanitizedBotInstruction({ customInstructions: "Prioritize liquid ETFs." }, [{ content: "Wait for stronger confirmation." }])).toContain("Internal learned caution");
     expect(sanitizedBotInstruction({ customInstructions: 42 })).toBeNull();
     expect(sanitizedBotInstruction(null)).toBeNull();
   });

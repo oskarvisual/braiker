@@ -55,13 +55,13 @@ export async function POST(request: Request, context: { params: Promise<{ botId:
       const session = await createBotChatSession({ userId: user.id, botId: params.botId, title: typeof body.title === "string" ? body.title : "Contextual explanation" }, prisma);
       const runtime = env();
       const responder = new OpenAiManagerChat({ apiKey: runtime.OPENAI_API_KEY, model: resolveManagerChatModel({ managerModel: runtime.BOT_MANAGER_CHAT_MODEL, defaultModel: runtime.OPENAI_MODEL }), timeoutMs: runtime.OPENAI_TIMEOUT_MS });
-      const result = await sendBotChatMessage({ userId: user.id, botId: params.botId, sessionId: session.id, content: body.content, focus }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
+      const result = await sendBotChatMessage({ userId: user.id, actorRole: user.role, botId: params.botId, sessionId: session.id, content: body.content, focus }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
       return NextResponse.json({ session: { id: session.id, title: session.title, kind: session.kind, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() }, result });
     }
     if (typeof body.content !== "string" || typeof body.sessionId !== "string") return NextResponse.json({ error: "BOT_CHAT_MESSAGE_REQUIRED" }, { status: 400 });
     const runtime = env();
     const responder = new OpenAiManagerChat({ apiKey: runtime.OPENAI_API_KEY, model: resolveManagerChatModel({ managerModel: runtime.BOT_MANAGER_CHAT_MODEL, defaultModel: runtime.OPENAI_MODEL }), timeoutMs: runtime.OPENAI_TIMEOUT_MS });
-    const result = await sendBotChatMessage({ userId: user.id, botId: params.botId, sessionId: body.sessionId, content: body.content }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
+    const result = await sendBotChatMessage({ userId: user.id, actorRole: user.role, botId: params.botId, sessionId: body.sessionId, content: body.content }, { db: prisma, responder, aiEnabled: runtime.AI_ENABLED && Boolean(runtime.OPENAI_API_KEY) });
     return NextResponse.json(result);
   } catch (error) {
     const code = error instanceof Error ? error.message : "BOT_CHAT_FAILED";

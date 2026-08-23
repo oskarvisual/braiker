@@ -3,8 +3,10 @@ import { managerUnavailableReply, sanitizeManagerMessage } from "@/modules/manag
 import type { ManagerResponder } from "@/modules/manager-chat/manager-chat-service";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { isBotChatAvailable } from "@/modules/bot-chat/availability";
+import { parseBotLearningCommand, recordLearnedInstruction } from "@/modules/bots/learned-instruction-service";
+import type { UserRole } from "@prisma/client";
 
-type BotChatDb = Pick<PrismaClient, "botChatSession" | "botChatMessage" | "botDailyContext" | "botInstance" | "order" | "tradeProposal" | "botScanRun">;
+type BotChatDb = Pick<PrismaClient, "botChatSession" | "botChatMessage" | "botDailyContext" | "botInstance" | "order" | "tradeProposal" | "botScanRun" | "botLearnedInstruction" | "auditLog">;
 
 export type BotChatFocus = { kind: "ORDER"; id: string } | { kind: "SCAN"; id: string };
 
@@ -19,7 +21,7 @@ export async function createBotChatSession(input: { userId: string; botId: strin
 }
 
 async function assertBotCanChat(botId: string, db: Pick<PrismaClient, "botInstance">) {
-  const bot = await db.botInstance.findUnique({ where: { id: botId }, select: { id: true, runMode: true, lifeStatus: true, status: true, killSwitch: true } });
+  const bot = await db.botInstance.findUnique({ where: { id: botId }, select: { id: true, walletId: true, runMode: true, lifeStatus: true, status: true, killSwitch: true } });
   if (!bot) throw new Error("BOT_NOT_FOUND");
   if (!isBotChatAvailable(bot)) throw new Error("BOT_CHAT_REQUIRES_ACTIVE_BOT");
   return bot;
@@ -87,13 +89,24 @@ async function botContext(botId: string, db: BotChatDb, focus?: BotChatFocus) {
 }
 
 /** Stores one selected-session question and its contextual, no-authority answer. */
-export async function sendBotChatMessage(input: { userId: string; botId: string; sessionId: string; content: string; focus?: BotChatFocus }, dependencies: { db: BotChatDb; responder: ManagerResponder; aiEnabled: boolean }) {
+export async function sendBotChatMessage(input: { userId: string; botId: string; sessionId: string; content: string; focus?: BotChatFocus; actorRole?: UserRole }, dependencies: { db: BotChatDb; responder: ManagerResponder; aiEnabled: boolean }) {
   const content = sanitizeManagerMessage(input.content);
   if (!content) throw new Error("BOT_CHAT_MESSAGE_EMPTY");
-  await assertBotCanChat(input.botId, dependencies.db);
+  const bot = await assertBotCanChat(input.botId, dependencies.db);
   const session = await dependencies.db.botChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, botId: input.botId }, select: { id: true } });
   if (!session) throw new Error("BOT_CHAT_SESSION_NOT_FOUND");
   const message = await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "USER", content } });
+  const learnedContent = parseBotLearningCommand(content);
+  if (learnedContent) {
+    const reply = input.actorRole === "ADMIN"
+      ? await (async () => {
+          const result = await recordLearnedInstruction({ userId: input.userId, botId: input.botId, walletId: bot.walletId, content: learnedContent, source: "BOT_CHAT" }, dependencies.db);
+          return result.created ? `Recorded internal caution rule revision ${result.instruction.revision}. It does not replace Additional instructions and can only add caution or veto AI review.` : "That exact internal rule is already the latest revision; no duplicate was recorded.";
+        })()
+      : "Only an Admin may record internal learning.";
+    await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "ASSISTANT", content: reply } });
+    return { reply, available: true, addedToDailyContext: false };
+  }
   const dailyContent = importantDayContext(content);
   if (dailyContent) await dependencies.db.botDailyContext.create({ data: { botId: input.botId, userId: input.userId, messageId: message.id, marketDate: newYorkMarketDate(new Date()), source: "USER_CHAT", content: dailyContent } });
   if (!dependencies.aiEnabled) {

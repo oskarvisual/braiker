@@ -56,6 +56,10 @@ export async function POST(request: Request) {
         watchlist: { create: symbols.map((symbol) => ({ symbol })) },
         memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols, customInstructions: body.data.customInstructions ?? "", riskLimits: body.data.riskLimits ?? null } } }
       } });
+      if (body.data.sourceBotId) {
+        const rules = await tx.botLearnedInstruction.findMany({ where: { botId: body.data.sourceBotId, active: true }, orderBy: { revision: "asc" }, select: { content: true } });
+        if (rules.length) await tx.botLearnedInstruction.createMany({ data: rules.map((rule, index) => ({ botId: created.id, createdById: user.id, source: "CLONE", content: rule.content, revision: index + 1 })) });
+      }
       await tx.botCapitalEvent.create({ data: { botId: created.id, kind: "ALLOCATION", amount: budget, balanceAfter: budget, metadata: { source: "WALLET_UNALLOCATED_CAPITAL" } } });
       const updatedWallet = await tx.wallet.findUniqueOrThrow({ where: { id: body.data.walletId }, select: { unallocatedCapital: true } });
       return { bot: created, unallocatedCapital: updatedWallet.unallocatedCapital };
