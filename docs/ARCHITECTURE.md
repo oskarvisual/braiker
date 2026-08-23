@@ -113,7 +113,7 @@ The static Guardian/Navigator/Explorer templates retain their strategy weights a
 | Area | Endpoints / page | Notes |
 | --- | --- | --- |
 | Auth | `/login`, `/api/auth/*`, `/account/password` | session and password lifecycle |
-| Dashboard | `/`, `/api/dashboard/overview`, `/api/dashboard/sync` | sync is Admin-only |
+| Dashboard | `/`, `/api/dashboard/overview`, `/api/dashboard/sync` | Admin fleet/capital totals span all virtual wallets; positions, orders, and equity remain the single global Alpaca Paper account. Zero-equity startup snapshots are excluded from chart/P&L; sync is Admin-only. |
 | Bots | `/setup`, `/api/bots`, `/api/bots/[botId]`, `/api/bots/[botId]/control`, `/api/bots/[botId]/capital`, `/api/bots/[botId]/history`, `/api/bots/[botId]/analysis` | UI control body is `TURN_ON` or `TURN_OFF` only; Admin capital adjustments are serialized and Operations/Analysis history is authorized per wallet. The history read model includes active-position count and reserved capital solely for the deterministic, read-only survival indicator; it is never an execution input. |
 | Users | `/admin/users`, `/api/admin/users/*` | Admin only |
 | Settings | `/settings`, `/api/wallets`, `/api/wallets/[walletId]/capital`, `/api/settings/paper-capital`, `/api/settings/synchronization`, `/api/settings/operating-costs`, `/api/settings/notifications`, `/api/settings/telegram/pairing`, `/api/settings/macro-events`, `/api/settings/assets` | global Paper capital, serialized virtual-wallet budget changes, optional manual virtual operating cost, schedule, persisted alert preferences, server-synchronized tradable-asset catalog, per-event macro protection windows and immutable event history |
