@@ -18,6 +18,7 @@ const createSchema = z.object({
   budget: money,
   symbols: z.array(z.string().min(1).max(16)).min(1).max(50),
   customInstructions: z.string().trim().max(1200).optional(),
+  adaptiveRiskEnabled: z.boolean().default(false),
   riskLimits: z.object({ maxPositionSize: money.optional(), maxDailyLoss: money.optional(), maxTradesPerDay: z.number().int().min(1).optional() }).optional(),
   sourceBotId: z.string().uuid().optional()
 });
@@ -51,10 +52,11 @@ export async function POST(request: Request) {
         killSwitch: true,
         initialCapital: budget,
         currentCapital: budget,
+        adaptiveRiskEnabled: body.data.adaptiveRiskEnabled,
         riskPolicy: riskPolicy ?? DEFAULT_RISK_POLICY,
         strategyProfile: { strategyId: "trend-v1", version: 1, templateId: template.id, customInstructions: body.data.customInstructions ?? "", ...template.strategyProfile },
         watchlist: { create: symbols.map((symbol) => ({ symbol })) },
-        memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols, customInstructions: body.data.customInstructions ?? "", riskLimits: body.data.riskLimits ?? null } } }
+        memories: { create: { kind: "CONFIG", content: { templateId: template.id, source: "BOT_CREATED", symbols, customInstructions: body.data.customInstructions ?? "", adaptiveRiskEnabled: body.data.adaptiveRiskEnabled, riskLimits: body.data.riskLimits ?? null } } }
       } });
       if (body.data.sourceBotId) {
         const rules = await tx.botLearnedInstruction.findMany({ where: { botId: body.data.sourceBotId, active: true }, orderBy: { revision: "asc" }, select: { content: true } });
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
       const updatedWallet = await tx.wallet.findUniqueOrThrow({ where: { id: body.data.walletId }, select: { unallocatedCapital: true } });
       return { bot: created, unallocatedCapital: updatedWallet.unallocatedCapital };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    await prisma.auditLog.create({ data: { userId: user.id, walletId: bot.bot.walletId, action: body.data.sourceBotId ? "BOT_CLONED" : "BOT_CREATED", target: bot.bot.id, metadata: body.data.sourceBotId ? { sourceBotId: body.data.sourceBotId } : undefined } });
-    return NextResponse.json({ id: bot.bot.id, name: bot.bot.name, templateId: bot.bot.templateId, avatarSeed: bot.bot.avatarSeed, status: bot.bot.status, runMode: bot.bot.runMode, lifeStatus: bot.bot.lifeStatus, initialCapital: bot.bot.initialCapital.toString(), currentCapital: bot.bot.currentCapital.toString(), walletUnallocatedCapital: bot.unallocatedCapital.toString(), killSwitch: bot.bot.killSwitch, riskPolicy: bot.bot.riskPolicy }, { status: 201 });
+    await prisma.auditLog.create({ data: { userId: user.id, walletId: bot.bot.walletId, action: body.data.sourceBotId ? "BOT_CLONED" : "BOT_CREATED", target: bot.bot.id, metadata: { ...(body.data.sourceBotId ? { sourceBotId: body.data.sourceBotId } : {}), adaptiveRiskEnabled: body.data.adaptiveRiskEnabled } } });
+    return NextResponse.json({ id: bot.bot.id, name: bot.bot.name, templateId: bot.bot.templateId, avatarSeed: bot.bot.avatarSeed, status: bot.bot.status, runMode: bot.bot.runMode, lifeStatus: bot.bot.lifeStatus, initialCapital: bot.bot.initialCapital.toString(), currentCapital: bot.bot.currentCapital.toString(), walletUnallocatedCapital: bot.unallocatedCapital.toString(), killSwitch: bot.bot.killSwitch, adaptiveRiskEnabled: bot.bot.adaptiveRiskEnabled, riskPolicy: bot.bot.riskPolicy }, { status: 201 });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "UNKNOWN" }, { status: 400 }); }
 }
