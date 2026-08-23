@@ -352,6 +352,7 @@ model BotInstance {
   modeChanges    BotModeTransition[]
   memories       BotMemoryEntry[]
   capitalEvents  BotCapitalEvent[]
+  operatingCostAllocations OperatingCostAllocation[]
   proposals      TradeProposal[]
   watchlist      Watchlist[]
   botPositions   BotPosition[]
@@ -432,6 +433,25 @@ model BotCapitalEvent {
   metadata     Json?
   createdAt    DateTime    @default(now()) @db.DateTime(3)
   bot          BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, createdAt])
+}
+
+/// Durable, per-bot virtual operating-cost ledger. This never represents an
+/// Alpaca transfer and is unique for a bot's New York billing month.
+model OperatingCostAllocation {
+  id              String      @id @default(uuid()) @db.Char(36)
+  botId           String      @db.Char(36)
+  billingMonth    DateTime    @db.Date
+  monthlyCost     Decimal     @db.Decimal(28, 12)
+  allocatedAmount Decimal     @db.Decimal(28, 12)
+  chargedAmount   Decimal     @db.Decimal(28, 12)
+  unpaidAmount    Decimal     @db.Decimal(28, 12)
+  capitalBefore   Decimal     @db.Decimal(28, 12)
+  capitalAfter    Decimal     @db.Decimal(28, 12)
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
+  bot             BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@unique([botId, billingMonth])
+  @@index([billingMonth, createdAt])
   @@index([botId, createdAt])
 }
 
@@ -1048,4 +1068,13 @@ model PaperCapitalPool {
   unallocatedCapital Decimal  @default(100) @db.Decimal(28, 12)
   createdAt          DateTime @default(now()) @db.DateTime(3)
   updatedAt          DateTime @updatedAt @db.DateTime(3)
+}
+
+/// Global switch for the optional, manual virtual platform-cost allocation.
+model OperatingCostSettings {
+  scope       String   @id @default("global") @db.VarChar(32)
+  enabled     Boolean  @default(false)
+  monthlyCost Decimal  @default(0) @db.Decimal(28, 12)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
 }

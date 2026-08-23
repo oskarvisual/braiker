@@ -9,4 +9,11 @@ describe("bot history chat actions", () => {
     expect(component).toContain("{chatActive && <button");
     expect(component).not.toContain('disabled={!chatActive}');
   });
+
+  it("shows durable monthly virtual-cost records inside Analysis activity", () => {
+    const component = readFileSync(resolve(process.cwd(), "src/components/bot-history-modal.tsx"), "utf8");
+
+    expect(component).toContain("Monthly virtual operating cost charged");
+    expect(component).toContain("data.scans.length + data.operatingCosts.length");
+  });
 });
