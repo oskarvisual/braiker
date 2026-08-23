@@ -7,6 +7,7 @@ import { globalPaperBroker } from "@/modules/broker/global-paper";
 import { filterTradableUsEquities, normalizeUniverseSymbols } from "@/modules/watchlist/asset-universe";
 import { assetUniversePublicError } from "@/modules/watchlist/asset-universe-feedback";
 import { buildAssetUniversePageQuery } from "@/modules/watchlist/asset-universe-query";
+import { AssetCatalogPartialSyncError, synchronizeTradableAssets } from "@/modules/watchlist/asset-universe-sync";
 
 async function requireAdmin() { const user = await requireUser(); if (user.role !== "ADMIN") throw new Error("FORBIDDEN"); return user; }
 
@@ -31,10 +32,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request); await requireAdmin();
-    const assets = filterTradableUsEquities(await globalPaperBroker().listUsEquities()); const now = new Date();
-    await prisma.$transaction(assets.map((asset) => prisma.tradableAsset.upsert({ where: { symbol: asset.symbol }, create: { ...asset, assetClass: "us_equity", active: true, tradable: true, enabled: false, syncedAt: now }, update: { ...asset, assetClass: "us_equity", active: true, tradable: true, syncedAt: now } })));
-    return NextResponse.json({ synced: assets.length });
-  } catch (error) { const result = assetUniversePublicError(error); return NextResponse.json({ error: result.code }, { status: result.status }); }
+    const assets = filterTradableUsEquities(await globalPaperBroker().listUsEquities());
+    const synced = await synchronizeTradableAssets({ assets, db: prisma, now: new Date() });
+    return NextResponse.json({ synced });
+  } catch (error) {
+    const result = assetUniversePublicError(error);
+    return NextResponse.json({ error: result.code, ...(error instanceof AssetCatalogPartialSyncError ? { synced: error.synced } : {}) }, { status: result.status });
+  }
 }
 
 const updateSchema = z.object({ symbol: z.string().min(1).max(16), enabled: z.boolean() });

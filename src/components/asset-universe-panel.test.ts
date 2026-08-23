@@ -10,4 +10,12 @@ describe("asset universe empty state", () => {
     expect(component).toContain("Sync assets from Alpaca");
     expect(component).toContain('onClick={() => void sync()}');
   });
+
+  it("keeps the completed asset count visible when a later sync batch fails", () => {
+    const component = readFileSync(new URL("./asset-universe-panel.tsx", import.meta.url), "utf8");
+
+    expect(component).toContain("const completed = typeof body.synced === \"number\" ? body.synced : 0");
+    expect(component).toContain("were synchronized before the catalog became unavailable");
+    expect(component).toContain("await Promise.all([loadPage(true, selectedSearch), loadPage(false, availableSearch)])");
+  });
 });
