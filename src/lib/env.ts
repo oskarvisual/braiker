@@ -6,6 +6,7 @@ const schema = z.object({
   TRADING_MODE: z.literal("paper"),
   APP_ENCRYPTION_KEY: z.string().min(43),
   SESSION_SECRET: z.string().min(32),
+  APP_ORIGIN: z.string().trim().default(""),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email(),
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12),
   AI_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
@@ -29,6 +30,22 @@ const schema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info")
 }).superRefine((value, context) => {
   if (value.AI_ENABLED && value.OPENAI_API_KEY.length < 20) context.addIssue({ code: z.ZodIssueCode.custom, path: ["OPENAI_API_KEY"], message: "required when AI_ENABLED=true" });
+  if (value.NODE_ENV === "production" && !value.APP_ORIGIN) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["APP_ORIGIN"], message: "required in production" });
+  }
+  if (value.APP_ORIGIN) {
+    try {
+      const appUrl = new URL(value.APP_ORIGIN);
+      if (appUrl.origin !== value.APP_ORIGIN) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["APP_ORIGIN"], message: "must be an origin without a path, query, or trailing slash" });
+      }
+      if (value.NODE_ENV === "production" && appUrl.protocol !== "https:") {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["APP_ORIGIN"], message: "must use https in production" });
+      }
+    } catch {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["APP_ORIGIN"], message: "must be a valid URL" });
+    }
+  }
 });
 
 export type Environment = z.infer<typeof schema>;

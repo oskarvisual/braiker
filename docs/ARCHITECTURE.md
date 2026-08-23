@@ -146,6 +146,7 @@ Bot creation performs the same pure capital validation in the client for early f
 | `TRADING_MODE` | yes | Must remain `paper` |
 | `APP_ENCRYPTION_KEY` | yes | Base64 32-byte AES-256-GCM master key |
 | `SESSION_SECRET` | yes | Session signing/entropy secret |
+| `APP_ORIGIN` | staging/production | Canonical public browser origin used for CSRF checks behind a reverse proxy; use the exact HTTPS origin without a trailing slash |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | first boot | Initial Admin only |
 | `ALPACA_PAPER_BASE_URL`, `ALPACA_API_KEY`, `ALPACA_API_SECRET` | for global broker sync | One server-only Alpaca Paper credential pair; never requested per virtual wallet |
 | `ALPACA_DATA_FEED` | optional | Current default is `iex` |
@@ -157,7 +158,7 @@ Bot creation performs the same pure capital validation in the client for early f
 
 ## Staging deployment topology
 
-`app.staging.yaml` is the reproducible DigitalOcean App Platform definition and tracks the repository's `staging` branch for all three components. It creates one App Platform application containing one public web service (port 3000), one private worker (port 8080 liveness endpoint), and a `PRE_DEPLOY` Prisma migration job. The components share only the Managed MySQL connection and runtime secrets; they are not separate apps and neither runtime component carries deployment credentials. The image is built once from the Dockerfile and can run `node server.js`, `node dist/main.js`, or `npm run prisma:migrate`. Exactly one worker replica is mandatory for the Paper soak.
+`app.staging.yaml` is the reproducible DigitalOcean App Platform definition and tracks the repository's `staging` branch for all three components. It creates one App Platform application containing one public web service (port 3000), one private worker (port 8080 liveness endpoint), and a `PRE_DEPLOY` Prisma migration job. The components share only the Managed MySQL connection and runtime secrets; they are not separate apps and neither runtime component carries deployment credentials. Set `APP_ORIGIN` as an app-level non-secret to the exact browser URL (for example `https://braiker-stagging.orivisdev.shop`) so CSRF validation remains correct through App Platform's reverse proxy. The image is built once from the Dockerfile and can run `node server.js`, `node dist/main.js`, or `npm run prisma:migrate`. Exactly one worker replica is mandatory for the Paper soak.
 
 ## Testing and change protocol
 
