@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), assertSameOrigin: vi.fn(), findMany: vi.fn(), create: vi.fn(), delete: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireUser: vi.fn(), assertSameOrigin: vi.fn(), findMany: vi.fn(), create: vi.fn(), auditCreate: vi.fn() }));
 vi.mock("@/modules/auth/session", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/http", () => ({ assertSameOrigin: mocks.assertSameOrigin }));
-vi.mock("@/lib/prisma", () => ({ prisma: { macroCalendarEvent: { findMany: mocks.findMany, create: mocks.create } } }));
+vi.mock("@/lib/prisma", () => ({ prisma: { macroCalendarEvent: { findMany: mocks.findMany, create: mocks.create }, auditLog: { create: mocks.auditCreate } } }));
 
 describe("macro calendar settings API", () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.requireUser.mockResolvedValue({ id: "admin-1", role: "ADMIN" }); });
@@ -15,6 +15,7 @@ describe("macro calendar settings API", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ provider: "ADMIN", title: "US CPI", impact: "HIGH" }) }));
+    expect(mocks.auditCreate).toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({ id: "event-1", title: "US CPI", startsAt: "2026-08-24T12:30:00.000Z" });
   });
 

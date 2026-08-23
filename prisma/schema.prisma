@@ -143,6 +143,8 @@ model User {
   botDailyContexts BotDailyContext[]
   managerActionProposals ManagerActionProposal[]
   resourceSources ResourceSource[]
+  learnedInstructions BotLearnedInstruction[]
+  macroCalendarEvents MacroCalendarEvent[]
 }
 
 /// URL-only curated source registry. Source pages are untrusted input and
@@ -228,18 +230,32 @@ model DailyBotInput {
 /// Official or Admin-reviewed macro releases. The guard consumes only the
 /// explicit timestamp and impact classification, never page instructions.
 model MacroCalendarEvent {
-  id        String   @id @default(uuid()) @db.Char(36)
-  provider  String   @db.VarChar(80)
-  externalId String? @db.VarChar(191)
-  title     String   @db.VarChar(255)
-  impact    String   @default("HIGH") @db.VarChar(16)
-  startsAt  DateTime @db.DateTime(3)
-  sourceUrl String   @db.VarChar(191)
-  createdAt DateTime @default(now()) @db.DateTime(3)
-  updatedAt DateTime @updatedAt @db.DateTime(3)
+  id              String   @id @default(uuid()) @db.Char(36)
+  provider        String   @db.VarChar(80)
+  externalId      String?  @db.VarChar(191)
+  title           String   @db.VarChar(255)
+  impact          String   @default("HIGH") @db.VarChar(16)
+  startsAt        DateTime @db.DateTime(3)
+  sourceUrl       String   @db.VarChar(191)
+  sourceReference String?  @db.VarChar(191)
+  createdById     String?  @db.Char(36)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+  createdBy       User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
   @@unique([provider, title, startsAt])
   @@index([impact, startsAt])
   @@index([externalId])
+  @@index([createdById, createdAt])
+}
+
+/// One global, persistent macro protection window. The worker defaults to
+/// 10/15 until this row exists, so migrations never weaken the guard.
+model MacroGuardSettings {
+  scope         String   @id @default("global") @db.VarChar(24)
+  beforeMinutes Int      @default(10)
+  afterMinutes  Int      @default(15)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
 }
 
 model LoginThrottle {
@@ -341,8 +357,28 @@ model BotInstance {
   botChatSessions BotChatSession[]
   dailyInputs    DailyBotInput[]
   dailyContexts  BotDailyContext[]
+  learnedInstructions BotLearnedInstruction[]
   @@index([walletId, status])
   @@index([cloneSourceId])
+}
+
+/// Internal, additive learning. The visible strategy instruction always
+/// prevails and inactive revisions remain as audit history.
+model BotLearnedInstruction {
+  id            String      @id @default(uuid()) @db.Char(36)
+  botId         String      @db.Char(36)
+  createdById   String?     @db.Char(36)
+  source        String      @db.VarChar(24)
+  content       String      @db.VarChar(1200)
+  revision      Int
+  active        Boolean     @default(true)
+  deactivatedAt DateTime?   @db.DateTime(3)
+  createdAt     DateTime    @default(now()) @db.DateTime(3)
+  bot           BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  createdBy     User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  @@unique([botId, revision])
+  @@index([botId, active, createdAt])
+  @@index([createdById, createdAt])
 }
 
 model BotCapitalEvent {

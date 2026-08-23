@@ -4,8 +4,9 @@ export function aiReviewEligibility(input: { enabled: boolean; analysesToday: nu
   return { allowed: true, reason: null };
 }
 
-export function sanitizedBotInstruction(strategyProfile: unknown) {
+export function sanitizedBotInstruction(strategyProfile: unknown, learnedInstructions: LearnedInstruction[] = []) {
   if (!strategyProfile || typeof strategyProfile !== "object") return null;
   const value = (strategyProfile as { customInstructions?: unknown }).customInstructions;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+  return buildEffectiveBotInstruction({ userInstruction: typeof value === "string" ? value : null, learnedInstructions });
 }
+import { buildEffectiveBotInstruction, type LearnedInstruction } from "@/modules/bots/learned-instructions";

@@ -19,6 +19,7 @@ import { evaluateTrendStrategy, type StrategyProfile } from "@/modules/strategy/
 import { realizedPnlWindows } from "@/modules/risk/realized-pnl";
 import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { activeMacroGuard } from "@/modules/resources/macro-guard";
+import { loadMacroGuardWindow } from "@/modules/resources/macro-guard-settings";
 import { appendCautiousDailyContext } from "@/modules/bot-chat/daily-chat-context";
 import { marketCycleResumeAt } from "@/modules/scheduler/schedule-policy";
 
@@ -35,7 +36,7 @@ function domainBar(bar: { symbol: string; timeframe: string; timestamp: Date; op
 async function activeBots() {
   return prisma.botInstance.findMany({
     where: { runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false },
-    include: { watchlist: { where: { enabled: true } }, botPositions: true, dailyInputs: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { content: true }, take: 1 }, dailyContexts: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { source: true, content: true }, orderBy: { createdAt: "asc" }, take: 12 } }
+    include: { watchlist: { where: { enabled: true } }, botPositions: true, learnedInstructions: { where: { active: true }, orderBy: { revision: "asc" }, select: { content: true } }, dailyInputs: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { content: true }, take: 1 }, dailyContexts: { where: { marketDate: newYorkMarketDate(new Date()) }, select: { source: true, content: true }, orderBy: { createdAt: "asc" }, take: 12 } }
   });
 }
 
@@ -176,7 +177,7 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
         strategyReason: signal.reason,
         indicators: aiIndicators,
         marketRegime: regime,
-        botInstruction: sanitizedBotInstruction(input.bot.strategyProfile),
+        botInstruction: sanitizedBotInstruction(input.bot.strategyProfile, input.bot.learnedInstructions),
         dailyInput: safeDailyInput(input.bot)
       }
     });
@@ -187,11 +188,12 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
     }
     const pending = await prisma.tradeProposal.findMany({ where: { botId: input.bot.id, symbol: input.symbol, status: { in: ["RISK_APPROVED", "SUBMITTED"] } }, select: { symbol: true } });
     const macroNow = new Date();
+    const macroWindow = await loadMacroGuardWindow(prisma);
     const macroEvents = await prisma.macroCalendarEvent.findMany({
-      where: { impact: "HIGH", startsAt: { gte: new Date(macroNow.getTime() - 15 * 60_000), lte: new Date(macroNow.getTime() + 10 * 60_000) } },
+      where: { impact: "HIGH", startsAt: { gte: new Date(macroNow.getTime() - macroWindow.afterMinutes * 60_000), lte: new Date(macroNow.getTime() + macroWindow.beforeMinutes * 60_000) } },
       select: { id: true, title: true, impact: true, startsAt: true, sourceUrl: true }
     });
-    const macroGuard = activeMacroGuard(macroEvents, macroNow);
+    const macroGuard = activeMacroGuard(macroEvents, macroNow, macroWindow);
     const tradesToday = await prisma.tradeProposal.count({ where: { botId: input.bot.id, action: { not: TradeAction.HOLD }, createdAt: { gte: new Date(new Date().setUTCHours(0, 0, 0, 0)) } } });
     const pnl = await realizedPnlWindows(prisma.fill, input.bot.id);
     const result = await recordProposedTrade({
