@@ -11,11 +11,12 @@ describeMysql("Macro calendar guard (MySQL)", () => {
   beforeEach(async () => { await db?.macroCalendarEvent.deleteMany(); });
   afterAll(async () => db?.$disconnect());
 
-  it("persists official high-impact timing and supplies it to the deterministic guard", async () => {
+  it("persists an event-specific protection window and supplies it to the deterministic guard", async () => {
     if (!db) throw new Error("BRAIKER_TEST_DATABASE_URL is required");
-    await db.macroCalendarEvent.create({ data: { provider: "BLS", title: "US CPI release", impact: "HIGH", startsAt: new Date("2026-08-24T12:30:00.000Z"), sourceUrl: "https://www.bls.gov/" } });
+    await db.macroCalendarEvent.create({ data: { provider: "BLS", title: "US CPI release", impact: "HIGH", startsAt: new Date("2026-08-24T12:30:00.000Z"), sourceUrl: "https://www.bls.gov/", beforeMinutes: 30, afterMinutes: 45 } });
     const events = await db.macroCalendarEvent.findMany({ where: { impact: "HIGH" } });
 
-    expect(activeMacroGuard(events, new Date("2026-08-24T12:25:00.000Z"))).toMatchObject({ active: true, eventTitle: "US CPI release" });
+    expect(events[0]).toMatchObject({ beforeMinutes: 30, afterMinutes: 45 });
+    expect(activeMacroGuard(events, new Date("2026-08-24T12:00:00.000Z"))).toMatchObject({ active: true, eventTitle: "US CPI release" });
   });
 });

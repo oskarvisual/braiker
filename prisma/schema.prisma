@@ -237,6 +237,8 @@ model MacroCalendarEvent {
   title           String   @db.VarChar(255)
   impact          String   @default("HIGH") @db.VarChar(16)
   startsAt        DateTime @db.DateTime(3)
+  beforeMinutes   Int      @default(10)
+  afterMinutes    Int      @default(15)
   sourceUrl       String   @db.VarChar(191)
   sourceReference String?  @db.VarChar(191)
   createdById     String?  @db.Char(36)
@@ -249,8 +251,8 @@ model MacroCalendarEvent {
   @@index([createdById, createdAt])
 }
 
-/// One global, persistent macro protection window. The worker defaults to
-/// 10/15 until this row exists, so migrations never weaken the guard.
+/// Retired compatibility storage from the former global guard window. New
+/// macro events persist their own window and the worker no longer reads this.
 model MacroGuardSettings {
   scope         String   @id @default("global") @db.VarChar(24)
   beforeMinutes Int      @default(10)

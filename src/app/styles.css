@@ -106,6 +106,19 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .notificationChannelContent .eventOptions > label { min-height:0; padding:11px 12px; }
 .macroCalendarPanel { margin-top:18px; padding:24px; }
 .macroCalendarPanel .settingsControl { gap:14px; margin-top:18px; }
+.macroCalendarOverlay { z-index:120; width:100vw; height:100vh; }
+.macroCalendarModal { width:min(100%,640px); }
+.macroCalendarTabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:20px; }
+.macroCalendarTabs button { min-height:44px; }
+.macroCalendarTabs .selected { border-color:#59d69d; background:#1b493a; color:#e9fff5; }
+.macroCalendarList { margin-top:20px; }
+.macroCalendarList article small + small { margin-top:4px; }
+.macroCalendarEmpty { display:grid; place-content:center; min-height:190px; gap:9px; text-align:center; }
+.macroCalendarEmpty strong { color:var(--text); font-size:1.05rem; }
+.macroCalendarEmpty p { max-width:360px; margin:0; line-height:1.5; }
+.macroCalendarPagination { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px; margin-top:20px; padding-top:20px; border-top:1px solid var(--edge); text-align:center; }
+.macroCalendarPagination button:last-child { justify-self:end; }
+@media (max-width:800px) { .macroCalendarTabs,.macroCalendarPagination { grid-template-columns:1fr; }.macroCalendarPagination button:last-child { justify-self:stretch; }.macroCalendarPagination span { grid-row:1; }.macroCalendarPagination button { width:100%; }.macroCalendarEmpty { min-height:150px; } }
 
 /* Both manager and local-bot chats use the same compact, auto-growing composer. */
 .managerMessages { align-content:stretch; }

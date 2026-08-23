@@ -13,4 +13,10 @@ describe("macro event guard", () => {
     expect(activeMacroGuard([event], new Date("2026-08-24T12:19:59.999Z"))).toEqual({ active: false });
     expect(activeMacroGuard([{ ...event, impact: "MEDIUM" }], new Date("2026-08-24T12:30:00.000Z"))).toEqual({ active: false });
   });
+
+  it("uses each event's own safe guard window", () => {
+    const extended = { ...event, beforeMinutes: 30, afterMinutes: 45 };
+    expect(activeMacroGuard([extended], new Date("2026-08-24T12:00:00.000Z"))).toMatchObject({ active: true });
+    expect(activeMacroGuard([extended], new Date("2026-08-24T13:15:00.001Z"))).toEqual({ active: false });
+  });
 });
