@@ -21,6 +21,8 @@ import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { activeMacroGuard } from "@/modules/resources/macro-guard";
 import { appendCautiousDailyContext } from "@/modules/bot-chat/daily-chat-context";
 import { marketCycleResumeAt } from "@/modules/scheduler/schedule-policy";
+import { policyForAdaptiveTrade, resolveAdaptiveRiskPolicy } from "@/modules/bots/adaptive-risk";
+import { recordAdaptiveRiskAdjustment } from "@/modules/bots/adaptive-risk-audit";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -48,10 +50,6 @@ function strategyProfile(bot: ActiveBot): StrategyProfile {
   const template = getBotTemplate(bot.templateId as "GUARDIAN" | "NAVIGATOR" | "EXPLORER");
   const persisted = bot.strategyProfile as Partial<StrategyProfile>;
   return { id: template.id, ...template.strategyProfile, ...persisted };
-}
-
-function riskPolicy(bot: ActiveBot): RiskPolicy {
-  return bot.riskPolicy as unknown as RiskPolicy;
 }
 
 function safeDailyInput(bot: ActiveBot) {
@@ -151,7 +149,10 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
       return "hold";
     }
     const dataFresh = Date.now() - input.candle.timestamp.getTime() <= STALE_AFTER_MS && Date.now() - input.quote.timestamp.getTime() <= STALE_AFTER_MS;
-    const policy = riskPolicy(input.bot);
+    const basePolicy = input.bot.riskPolicy as unknown as RiskPolicy;
+    const adaptiveRisk = resolveAdaptiveRiskPolicy({ enabled: input.bot.adaptiveRiskEnabled, basePolicy, initialCapital: input.bot.initialCapital.toString(), currentCapital: input.bot.currentCapital.toString(), reservedCapital: input.bot.reservedCapital.toString(), openPositionCount: input.bot.botPositions.length });
+    const policy = policyForAdaptiveTrade(signal.action, basePolicy, adaptiveRisk.effectivePolicy);
+    if (input.bot.adaptiveRiskEnabled) await recordAdaptiveRiskAdjustment({ botId: input.bot.id, level: adaptiveRisk.level, reason: adaptiveRisk.reason, basePolicy, effectivePolicy: adaptiveRisk.effectivePolicy }, prisma);
     const positionExposure = input.bot.botPositions.reduce((total, item) => total.plus(item.quantity.mul(item.averageEntryPrice)), new Prisma.Decimal(0));
     const proposal = signal.action === "SELL" && position
       ? { symbol: input.symbol, action: "SELL" as const, orderType: "MARKET" as const, quantity: position.quantity.toString(), estimatedPrice: input.quote.bid }

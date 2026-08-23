@@ -340,6 +340,7 @@ model BotInstance {
   diedAt         DateTime? @db.DateTime(3)
   status         BotStatus @default(PAUSED)
   killSwitch     Boolean   @default(true)
+  adaptiveRiskEnabled Boolean @default(false)
   riskPolicy     Json
   strategyProfile Json
   aiProfile      Json?
@@ -362,8 +363,24 @@ model BotInstance {
   dailyContexts  BotDailyContext[]
   learnedInstructions BotLearnedInstruction[]
   learningProposals BotLearningProposal[]
+  riskAdjustments BotRiskAdjustment[]
   @@index([walletId, status])
   @@index([cloneSourceId])
+}
+
+/// Immutable changes to an opt-in adaptive survival posture. The saved bot
+/// risk policy remains the administrator-owned ceiling for every entry.
+model BotRiskAdjustment {
+  id              String      @id @default(uuid()) @db.Char(36)
+  botId           String      @db.Char(36)
+  level           String      @db.VarChar(24)
+  reason          String      @db.VarChar(500)
+  fingerprint     String      @db.Char(64)
+  basePolicy      Json
+  effectivePolicy Json
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
+  bot             BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@index([botId, createdAt])
 }
 
 /// Internal, additive learning. The visible strategy instruction always

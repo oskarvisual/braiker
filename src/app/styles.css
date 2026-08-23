@@ -106,6 +106,8 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .notificationChannelContent .eventOptions > label { min-height:0; padding:11px 12px; }
 .macroCalendarPanel { margin-top:18px; padding:24px; }
 .macroCalendarPanel .settingsControl { gap:14px; margin-top:18px; }
+.adaptiveRiskToggle { margin-top:18px; }
+.adaptiveRiskNotice { margin:14px 0 0; padding:13px 14px; border:1px solid #406050; border-radius:10px; background:#10231d; color:#bdd6c7; line-height:1.45; }
 .macroCalendarOverlay { z-index:120; width:100vw; height:100vh; }
 .macroCalendarModal { width:min(100%,640px); }
 .macroCalendarTabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:20px; }

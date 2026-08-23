@@ -54,7 +54,7 @@ Workers claim recoverable work with conditional MySQL updates. Never replace thi
 | --- | --- |
 | Identity | `User`, `Session`, `WalletMember`, `AuditLog` |
 | Wallet/broker | `PaperCapitalPool`, `Wallet`, `BrokerConnection` (legacy/future multi-account only) |
-| Bots | `BotProfileDefault` (three editable personality caps), `BotInstance` (including optional `cloneSourceId` lineage), `BotCapitalEvent`, `BotMemoryEntry`, `BotModeTransition`, `BotStateTransition`, `Watchlist` |
+| Bots | `BotProfileDefault` (three editable personality caps), `BotInstance` (including optional `cloneSourceId` lineage and opt-in `adaptiveRiskEnabled`), `BotRiskAdjustment` (immutable effective-posture audit), `BotCapitalEvent`, `BotMemoryEntry`, `BotModeTransition`, `BotStateTransition`, `Watchlist` |
 | Market/decision | `MarketBar`, `MarketSnapshot`, `MarketStreamEvent`, `StrategySignal`, `AiDecision`, `TradeProposal`, `RiskDecision` |
 | Execution/portfolio | `MarketEvaluation`, `ExecutionJob`, `Order`, `Fill`, `BotPosition`, `Position`, `BrokerOrderSnapshot`, `PortfolioSnapshot`, `DailyPerformance`, `ReconciliationRun` |
 | Operations | `ScheduledTask`, `JobRun`, `SystemEvent`, `ErrorEvent`, `NotificationSettings`, `NotificationAlert`, `AiRuntimeState`, `WorkerRuntimeState`, `MacroCalendarEvent`, `MacroGuardSettings`, `BotLearnedInstruction`, `TelegramManagerSession`, `TelegramPairingCode`, `TelegramRuntimeState`, `TelegramManagerMessage`, `ManagerChatSession`, `ManagerChatMessage`, `ManagerActionProposal`, `BotChatSession`, `BotChatMessage`, `BotDailyContext` |
@@ -104,6 +104,7 @@ The static Guardian/Navigator/Explorer templates retain their strategy weights a
 
 - Settings changes affect new bots immediately; they do not silently rewrite `BotInstance.riskPolicy` for existing bots.
 - When an existing bot is saved, its three risk inputs may be adjusted up to the current configured cap for its personality.
+- An Admin may enable `BotInstance.adaptiveRiskEnabled`. The worker derives an effective policy for new `BUY`s from the bot's saved policy and realized liquid-capital drawdown: below 85% it halves the three adjustable caps, below 50% it quarters monetary caps and permits one trade/day. A risk-reducing `SELL` keeps the saved base policy. Adaptive mode never widens a saved cap, changes capital, bypasses another risk gate, or treats deployed/reserved capital as a drawdown. A new `BotRiskAdjustment` is written only when that effective posture changes.
 - The configured position cannot exceed the static `maxPortfolioExposure`; daily loss cannot exceed static `maxWeeklyLoss`; trades/day cannot exceed twice the static template count. Margin, shorting, options, leverage, portfolio exposure, weekly loss, and order buffer stay non-configurable.
 - `PUT /api/settings/bot-profiles` is Admin-only, same-origin, audited, validates decimal values, and upserts the selected template override. `getConfiguredBotTemplate` is the required source for bot create/update limits; do not use a static template for those paths.
 
