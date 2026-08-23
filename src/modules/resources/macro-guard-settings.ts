@@ -9,15 +9,3 @@ export function normalizeMacroGuardWindow(input: MacroGuardWindow): MacroGuardWi
   if (input.beforeMinutes > MAX_MACRO_GUARD_MINUTES || input.afterMinutes > MAX_MACRO_GUARD_MINUTES) throw new Error("MACRO_GUARD_WINDOW_TOO_LONG");
   return { beforeMinutes: input.beforeMinutes, afterMinutes: input.afterMinutes };
 }
-
-type MacroGuardSettingsDb = {
-  macroGuardSettings: {
-    findUnique(args: { where: { scope: string }; select: { beforeMinutes: true; afterMinutes: true } }): Promise<{ beforeMinutes: number; afterMinutes: number } | null>;
-  };
-};
-
-/** If settings have not been created yet, retain the historical safe window. */
-export async function loadMacroGuardWindow(db: MacroGuardSettingsDb): Promise<MacroGuardWindow> {
-  const settings = await db.macroGuardSettings.findUnique({ where: { scope: "global" }, select: { beforeMinutes: true, afterMinutes: true } });
-  return settings ? normalizeMacroGuardWindow(settings) : defaultMacroGuardWindow;
-}

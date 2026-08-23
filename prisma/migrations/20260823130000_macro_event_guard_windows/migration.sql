@@ -1,0 +1,3 @@
+ALTER TABLE `MacroCalendarEvent`
+  ADD COLUMN `beforeMinutes` INTEGER NOT NULL DEFAULT 10,
+  ADD COLUMN `afterMinutes` INTEGER NOT NULL DEFAULT 15;
