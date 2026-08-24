@@ -10,5 +10,5 @@ export default async function ActivityPage() {
   if (!user) redirect("/login");
   const history = await listActivityHistory({ userId: user.id, role: user.role }, prisma);
   if (!history.hasWallets) redirect("/");
-  return <><AppNavigation user={{ email: user.email, role: user.role }} /><main className="shell appContent"><ActivityFeed orders={history.orders} bots={history.bots} /></main></>;
+  return <><AppNavigation user={{ email: user.email, role: user.role }} /><main className="shell appContent"><ActivityFeed orders={history.orders} bots={history.bots} wallets={history.wallets} /></main></>;
 }

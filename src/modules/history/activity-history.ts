@@ -6,6 +6,7 @@ type ActivityHistoryDb = Pick<PrismaClient, "wallet" | "tradeProposal" | "order"
 export type ActivityHistoryOrder = {
   id: string;
   proposalId: string | null;
+  walletId: string | null;
   botId: string | null;
   botName: string | null;
   symbol: string;
@@ -21,17 +22,17 @@ export type ActivityHistoryOrder = {
 };
 
 /** All accessible wallets contribute to the unified History view. */
-export async function listActivityHistory(input: { userId: string; role: UserRole }, db: ActivityHistoryDb): Promise<{ hasWallets: boolean; bots: Array<{ id: string; name: string }>; orders: ActivityHistoryOrder[] }> {
+export async function listActivityHistory(input: { userId: string; role: UserRole }, db: ActivityHistoryDb): Promise<{ hasWallets: boolean; wallets: Array<{ id: string; name: string }>; bots: Array<{ id: string; name: string; walletId: string }>; orders: ActivityHistoryOrder[] }> {
   const wallets = await db.wallet.findMany({
     where: input.role === "ADMIN" ? {} : { members: { some: { userId: input.userId } } },
-    select: { id: true, bots: { select: { id: true, name: true } } }
+    select: { id: true, name: true, bots: { select: { id: true, name: true } } }
   });
   const walletIds = wallets.map((wallet) => wallet.id);
-  if (!walletIds.length) return { hasWallets: false, bots: [], orders: [] };
+  if (!walletIds.length) return { hasWallets: false, wallets: [], bots: [], orders: [] };
 
   const proposals = await db.tradeProposal.findMany({
     where: { bot: { walletId: { in: walletIds } } },
-    select: { id: true, bot: { select: { id: true, name: true } } }
+    select: { id: true, bot: { select: { id: true, name: true, walletId: true } } }
   });
   const proposalById = new Map(proposals.map((proposal) => [proposal.id, proposal]));
   const proposalIds = proposals.map((proposal) => proposal.id);
@@ -48,6 +49,7 @@ export async function listActivityHistory(input: { userId: string; role: UserRol
       return {
         id: `braiker-${order.id}`,
         proposalId: order.proposalId,
+        walletId: proposal?.bot.walletId ?? null,
         botId: proposal?.bot.id ?? null,
         botName: proposal?.bot.name ?? null,
         symbol: order.symbol,
@@ -67,6 +69,7 @@ export async function listActivityHistory(input: { userId: string; role: UserRol
       .map((order) => ({
         id: `alpaca-${order.id}`,
         proposalId: null,
+        walletId: order.walletId,
         botId: null,
         botName: null,
         symbol: order.symbol,
@@ -82,7 +85,7 @@ export async function listActivityHistory(input: { userId: string; role: UserRol
       }))
   ].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt));
 
-  return { hasWallets: true, bots: wallets.flatMap((wallet) => wallet.bots), orders: historyOrders };
+  return { hasWallets: true, wallets: wallets.map(({ id, name }) => ({ id, name })), bots: wallets.flatMap((wallet) => wallet.bots.map((bot) => ({ ...bot, walletId: wallet.id }))), orders: historyOrders };
 }
 
 function prismaOrdersForProposals(proposalIds: string[], db: ActivityHistoryDb) {
