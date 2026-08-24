@@ -23,7 +23,7 @@ describe("Telegram Bot Manager", () => {
   });
 
   it("only provides read-only management replies", () => {
-    expect(managerReplyForCommand("/status")).toContain("read-only");
+    expect(managerReplyForCommand("/status")).toContain("system and daily operating report");
     expect(managerReplyForCommand("turn all bots off")).toContain("cannot change");
     expect(managerReplyForCommand("/help")).toContain("/off");
   });

@@ -46,8 +46,7 @@ export function parseTelegramControlCommand(text: string): { action: "TURN_ON" |
 export function managerReplyForCommand(text: string) {
   const command = text.trim().toLowerCase().split(/\s+/)[0];
   if (command === "/help") return "Ask for status/reports or say activate/apaga <exact bot name>. Admins receive a proposal and must send CONFIRMAR <código>; /on <bot-id> and /off <bot-id> also work.";
-  if (command === "/status") return "BrAIker Bot Manager is read-only. Use the dashboard for live service health and bot controls.";
-  if (command === "/report") return "BrAIker Bot Manager is read-only. Use History and bot details for orders and decision reports.";
+  if (command === "/status" || command === "/report") return "Requesting a read-only system and daily operating report. It cannot change trading controls.";
   return "I cannot change capital, risk settings, instructions, Kill Switches, or orders from Telegram. Use /help for information and explicit one-bot proposals.";
 }
 
@@ -80,7 +79,7 @@ function telegramApi(token: string): TelegramApi {
 type TelegramDb = Pick<typeof prisma,
   "telegramRuntimeState" | "telegramPairingCode" | "telegramManagerSession" | "telegramManagerMessage" | "notificationSettings" |
   "managerChatSession" | "managerChatMessage" | "managerActionProposal" | "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" |
-  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "botLearnedInstruction" | "botLearningProposal" | "resourceSource" | "macroCalendarEvent" | "auditLog"
+  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "botLearnedInstruction" | "botLearningProposal" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog"
 >;
 
 /**
