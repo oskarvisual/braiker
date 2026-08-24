@@ -15,6 +15,10 @@ describe("notification settings", () => {
     expect(notificationEvents.map((event) => event.id)).toContain("OPENAI_QUOTA_EXHAUSTED");
     expect(notificationEvents.map((event) => event.id)).toContain("LEARNING_PROPOSAL");
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_DAILY_REPORT");
+    expect(notificationEvents.find((event) => event.id === "BOT_MANAGER_DAILY_REPORT")).toEqual(expect.objectContaining({
+      label: "Daily Bot Manager reports",
+      description: expect.stringContaining("Pre-market and closing"),
+    }));
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_WEEKLY_REPORT");
     expect(notificationEvents.map((event) => event.id)).toContain("BOT_MANAGER_MONTHLY_REPORT");
   });

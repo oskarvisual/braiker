@@ -1,14 +1,24 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-export const managerReportCadences = ["DAILY", "WEEKLY", "MONTHLY"] as const;
+export const managerReportCadences = ["PREMARKET", "DAILY", "WEEKLY", "MONTHLY"] as const;
 export type ManagerReportCadence = (typeof managerReportCadences)[number];
 
 export const managerReportSchedules = [
-  { cadence: "DAILY", taskName: "bot-manager-daily-report", cronExpression: "35 16 * * *", timezone: "America/New_York" },
+  { cadence: "PREMARKET", taskName: "bot-manager-premarket-report", cronExpression: "35 8 * * 1-5", timezone: "America/New_York" },
+  // The first candidate catches standard US early closes. The regular close is the fallback.
+  { cadence: "DAILY", taskName: "bot-manager-early-close-report", cronExpression: "5 13 * * 1-5", timezone: "America/New_York" },
+  { cadence: "DAILY", taskName: "bot-manager-closing-report", cronExpression: "5 16 * * 1-5", timezone: "America/New_York" },
   { cadence: "WEEKLY", taskName: "bot-manager-weekly-report", cronExpression: "45 16 * * 5", timezone: "America/New_York" },
   { cadence: "MONTHLY", taskName: "bot-manager-monthly-report", cronExpression: "0 17 1 * *", timezone: "America/New_York" },
 ] as const satisfies ReadonlyArray<{ cadence: ManagerReportCadence; taskName: string; cronExpression: string; timezone: string }>;
+
+/** Daily exchange reports exist only when the pre-market worker created that day's immutable market brief. */
+export function shouldPublishScheduledManagerReport(cadence: ManagerReportCadence, hasMarketDayBrief: boolean, marketIsOpen?: boolean) {
+  if (cadence === "PREMARKET") return hasMarketDayBrief;
+  if (cadence === "DAILY") return hasMarketDayBrief && marketIsOpen === false;
+  return true;
+}
 
 type ReportCounts = {
   bots: { on: number; off: number; dead: number };
@@ -25,7 +35,9 @@ export type BotManagerReportReadDb = Pick<PrismaClient, "botInstance" | "order" 
 export type BotManagerReportDb = BotManagerReportReadDb & Pick<PrismaClient, "notificationAlert">;
 
 const reportConfiguration = {
-  DAILY: { eventType: "BOT_MANAGER_DAILY_REPORT", label: "Daily" },
+  // Pre-market and closing are one daily notification preference so existing selected channels receive both reports.
+  PREMARKET: { eventType: "BOT_MANAGER_DAILY_REPORT", label: "Pre-market" },
+  DAILY: { eventType: "BOT_MANAGER_DAILY_REPORT", label: "Closing" },
   WEEKLY: { eventType: "BOT_MANAGER_WEEKLY_REPORT", label: "Weekly" },
   MONTHLY: { eventType: "BOT_MANAGER_MONTHLY_REPORT", label: "Monthly" },
 } as const;
@@ -41,15 +53,57 @@ function newYorkDateParts(date: Date) {
   return { year: part("year") ?? "0000", month: part("month") ?? "00", day: part("day") ?? "00" };
 }
 
+function newYorkDayStartFromParts(parts: { year: string; month: string; day: string }) {
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const localNoonAsUtc = new Date(Date.UTC(year, month - 1, day, 12));
+  const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" })
+    .formatToParts(localNoonAsUtc)
+    .find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+  const offset = offsetName.match(/^GMT([+-])(\d{1,2})(?::(\d{2}))?$/);
+  const offsetMinutes = offset ? (offset[1] === "+" ? 1 : -1) * (Number(offset[2]) * 60 + Number(offset[3] ?? "0")) : 0;
+  return new Date(Date.UTC(year, month - 1, day) - offsetMinutes * 60_000);
+}
+
+function newYorkDayStart(date: Date) {
+  return newYorkDayStartFromParts(newYorkDateParts(date));
+}
+
+function previousNewYorkWeekdayStart(date: Date) {
+  const { year, month, day } = newYorkDateParts(date);
+  const cursor = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  do {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  } while (cursor.getUTCDay() === 0 || cursor.getUTCDay() === 6);
+  return newYorkDayStartFromParts({
+    year: String(cursor.getUTCFullYear()),
+    month: String(cursor.getUTCMonth() + 1).padStart(2, "0"),
+    day: String(cursor.getUTCDate()).padStart(2, "0"),
+  });
+}
+
 function reportPeriodKey(cadence: ManagerReportCadence, generatedAt: Date) {
   const { year, month, day } = newYorkDateParts(generatedAt);
   if (cadence === "MONTHLY") return `${year}-${month}`;
   return `${year}-${month}-${day}`;
 }
 
+export function managerReportDedupeKey(cadence: ManagerReportCadence, generatedAt: Date) {
+  return `bot-manager-report:${cadence.toLowerCase()}:${reportPeriodKey(cadence, generatedAt)}`;
+}
+
 function periodStart(cadence: ManagerReportCadence, generatedAt: Date) {
-  const durationMs = cadence === "DAILY" ? 24 * 60 * 60_000 : cadence === "WEEKLY" ? 7 * 24 * 60 * 60_000 : 30 * 24 * 60 * 60_000;
+  if (cadence === "DAILY") return newYorkDayStart(generatedAt);
+  if (cadence === "PREMARKET") return previousNewYorkWeekdayStart(generatedAt);
+  const durationMs = cadence === "WEEKLY" ? 7 * 24 * 60 * 60_000 : 30 * 24 * 60 * 60_000;
   return new Date(generatedAt.getTime() - durationMs);
+}
+
+function reportingWindowDescription(cadence: ManagerReportCadence) {
+  if (cadence === "DAILY") return "the current New York market day";
+  if (cadence === "PREMARKET") return "the previous completed weekday through pre-market";
+  return cadence === "WEEKLY" ? "the preceding 7 days" : "the preceding 30 days";
 }
 
 function compactReportText(value: string, maximum = 96) {
@@ -69,7 +123,7 @@ export function buildBotManagerReport(input: ReportInput) {
   const macroUpcoming = input.macro.upcoming.length ? `${input.macro.upcoming.length} guard${input.macro.upcoming.length === 1 ? "" : "s"}: ${input.macro.upcoming.slice(0, 3).map((event) => `${compactReportText(event.title)} (${event.startsAt})`).join("; ")}` : "none in the next 48 hours";
   const latestActivity = input.botActivity.length ? input.botActivity.slice(0, 6).map((activity) => `${compactReportText(activity.name, 48)}: ${activity.status.toLowerCase()} (${compactReportText(activity.reason.replaceAll("_", " ").toLowerCase(), 48)})`).join("; ") : "no bot scan activity recorded";
   const message = [
-    `${configuration.label} paper-only report for ${period}.\nReporting window: the preceding ${input.cadence === "DAILY" ? "24 hours" : input.cadence === "WEEKLY" ? "7 days" : "30 days"}, ending ${input.generatedAt.toISOString()}.`,
+    `${configuration.label} paper-only report for ${period}.\nReporting window: ${reportingWindowDescription(input.cadence)}, beginning ${start.toISOString()} and ending ${input.generatedAt.toISOString()}.`,
     `Paper-only fleet: ${input.bots.on} on, ${input.bots.off} off, ${input.bots.dead} dead.`,
     `Orders: ${input.orders.total} total, ${input.orders.filled} filled, ${input.orders.rejected} rejected, ${input.orders.inProgress} in progress.`,
     `Resources:\n${briefingSummary}.${reviewedSources.length ? `\nReviewed sources:\n${reviewedSources.map((resource) => `- ${compactReportText(resource.category, 24)}: ${compactReportText(resource.title)}`).join("\n")}` : ""}`,
@@ -78,7 +132,7 @@ export function buildBotManagerReport(input: ReportInput) {
   ].join("\n\n");
   return {
     eventType: configuration.eventType,
-    dedupeKey: `bot-manager-report:${input.cadence.toLowerCase()}:${period}`,
+    dedupeKey: managerReportDedupeKey(input.cadence, input.generatedAt),
     subject: `${configuration.label} Bot Manager report`,
     message,
     metadata: {

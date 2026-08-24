@@ -15,7 +15,7 @@ import { AlpacaMarketStreamManager } from "@/modules/market/alpaca-market-stream
 import { botScanRetentionCutoff } from "@/modules/market/bot-scan-activity";
 import { runOperationalAlertCheck } from "@/modules/monitoring/operational-monitor";
 import { pollTelegramBotManager, sanitizeTelegramError } from "@/modules/telegram/bot-manager";
-import { managerReportSchedules, publishBotManagerReport } from "@/modules/manager-reports/bot-manager-reports";
+import { managerReportDedupeKey, managerReportSchedules, publishBotManagerReport, shouldPublishScheduledManagerReport } from "@/modules/manager-reports/bot-manager-reports";
 import { recordWorkerHeartbeat } from "@/modules/monitoring/worker-runtime";
 import { startWorkerLivenessServer } from "@/modules/monitoring/worker-liveness";
 import { ensureDefaultResourceSources } from "@/modules/resources/resource-service";
@@ -58,6 +58,22 @@ async function publishBriefIfMarketDay() {
   }
   const brief = await publishDailyMarketBrief(newYorkMarketDate(now), prisma);
   await publishDailyBotInputs(brief.id, prisma);
+}
+
+async function publishManagerReportIfMarketDay(cadence: (typeof managerReportSchedules)[number]["cadence"]) {
+  const now = new Date();
+  const marketDate = newYorkMarketDate(now);
+  const brief = await prisma.dailyMarketBrief.findUnique({ where: { marketDate }, select: { id: true } });
+  const clock = cadence === "DAILY" ? await globalPaperBroker().getClock() : undefined;
+  if (!shouldPublishScheduledManagerReport(cadence, Boolean(brief), clock?.isOpen)) {
+    logger.info({ cadence, marketDate }, "Skipping Bot Manager report because the exchange has no session today");
+    return;
+  }
+  if (cadence === "DAILY") {
+    const existing = await prisma.notificationAlert.findUnique({ where: { dedupeKey: managerReportDedupeKey(cadence, now) }, select: { id: true } });
+    if (existing) return;
+  }
+  await publishBotManagerReport(cadence, now);
 }
 
 async function main() {
@@ -110,7 +126,7 @@ async function main() {
   cron.schedule("*/10 * * * * *", () => void pollTelegramBotManager().catch((error) => logger.warn({ err: sanitizeTelegramError(error) }, "Telegram Bot Manager polling failed")), { timezone: "UTC" });
   for (const schedule of managerReportSchedules) {
     cron.schedule(schedule.cronExpression, () => void runTask(schedule.taskName, async () => {
-      await publishBotManagerReport(schedule.cadence);
+      await publishManagerReportIfMarketDay(schedule.cadence);
     }), { timezone: schedule.timezone });
   }
   await heartbeat();
