@@ -4,7 +4,7 @@ import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, us
 import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
 import { useToast } from "@/components/toast";
 import { AssistantMarkdown } from "@/components/assistant-markdown";
-import { chatTitleEditorCommand } from "@/components/chat-title-editor";
+import { chatTitleEditorCommand, isChatTitleEditing } from "@/components/chat-title-editor";
 
 export type ManagerMessage = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; source: "WEB" | "TELEGRAM" | "TELEGRAM_ALERT" | "SYSTEM"; content: string; createdAt: string };
 export type ManagerSession = { id: string; title: string; kind: "OPERATIONS" | "CONVERSATION"; pinned: boolean; updatedAt: string; messages: ManagerMessage[] };
@@ -266,7 +266,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       </aside>
       <section className="managerConversation" aria-live="polite">
         {selected ? <>
-          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p>{renamingSessionId === selected.id ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} onKeyDown={handleRenameKeyDown} autoFocus /></form> : <h2 className={selected.pinned ? undefined : "chatTitle"} onDoubleClick={() => startRenaming(selected)}>{selected.title}</h2>}</div><div className="managerConversationStatus"><span>Confirmation required</span>{!selected.pinned && <button type="button" className="chatArchiveButton" onClick={() => void archiveConversation(selected)}>Archive</button>}</div></div>
+          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p>{isChatTitleEditing(renamingSessionId, selected.id) ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} onKeyDown={handleRenameKeyDown} autoFocus /></form> : <h2 className={selected.pinned ? undefined : "chatTitle"} onDoubleClick={() => startRenaming(selected)}>{selected.title}</h2>}</div><div className="managerConversationStatus"><span>Confirmation required</span>{!selected.pinned && <button type="button" className="chatArchiveButton" onClick={() => void archiveConversation(selected)}>Archive</button>}</div></div>
           <div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlderMessages(); }}>
             {loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}
             {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small>{message.role === "ASSISTANT" ? <div className="managerMessageContent"><AssistantMarkdown content={message.content} /></div> : <p>{message.content}</p>}</article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
