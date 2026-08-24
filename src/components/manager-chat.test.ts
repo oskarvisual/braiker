@@ -50,4 +50,13 @@ describe("synchronizeManagerSessions", () => {
     expect(readFileSync(resolve(process.cwd(), "src/components/manager-chat.tsx"), "utf8"))
       .not.toContain("Proposals require confirmation");
   });
+
+  it("starts at the latest message and pages backward inside the transcript", () => {
+    const component = readFileSync(resolve(process.cwd(), "src/components/manager-chat.tsx"), "utf8");
+
+    expect(component).toContain("container.scrollTop = container.scrollHeight");
+    expect(component).toContain("loadOlderMessages");
+    expect(component).toContain("/api/manager/sessions/${selected.id}/messages?before=");
+    expect(component).toContain("Loading earlier messages…");
+  });
 });

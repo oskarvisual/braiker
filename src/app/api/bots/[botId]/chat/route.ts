@@ -29,11 +29,15 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
     const user = await authorize(botId);
     const bot = await prisma.botInstance.findUnique({ where: { id: botId }, select: { runMode: true, lifeStatus: true, status: true, killSwitch: true } });
     const sessions = await prisma.botChatSession.findMany({ where: { userId: user.id, botId }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, kind: true, createdAt: true, updatedAt: true } });
-    const requestedSessionId = new URL(request.url).searchParams.get("sessionId");
+    const url = new URL(request.url);
+    const requestedSessionId = url.searchParams.get("sessionId");
     const selectedSession = sessions.find((session) => session.id === requestedSessionId) ?? sessions[0] ?? null;
-    const messages = selectedSession ? (await prisma.botChatMessage.findMany({ where: { sessionId: selectedSession.id }, orderBy: { createdAt: "desc" }, take: 100 })).reverse() : [];
+    const before = url.searchParams.get("before");
+    const rows = selectedSession ? await prisma.botChatMessage.findMany({ where: { sessionId: selectedSession.id }, ...(before ? { cursor: { id: before }, skip: 1 } : {}), orderBy: { createdAt: "desc" }, take: 51 }) : [];
+    const hasMore = rows.length > 50;
+    const messages = rows.slice(0, 50).reverse();
     const active = isBotChatAvailable(bot);
-    return NextResponse.json({ active, sessions: sessions.map((session) => ({ ...session, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() })), selectedSessionId: selectedSession?.id ?? null, messages: messages.map((message) => ({ id: message.id, role: message.role, content: message.content, createdAt: message.createdAt.toISOString() })) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ active, sessions: sessions.map((session) => ({ ...session, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() })), selectedSessionId: selectedSession?.id ?? null, messages: messages.map((message) => ({ id: message.id, role: message.role, content: message.content, createdAt: message.createdAt.toISOString() })), hasMore, nextCursor: hasMore ? messages[0]?.id ?? null : null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const code = error instanceof Error ? error.message : "BOT_CHAT_FAILED";
     return NextResponse.json({ error: code === "BOT_NOT_FOUND" ? code : "BOT_CHAT_FAILED" }, { status: code === "UNAUTHENTICATED" || code === "PASSWORD_CHANGE_REQUIRED" ? 401 : code === "BOT_NOT_FOUND" ? 404 : 400 });

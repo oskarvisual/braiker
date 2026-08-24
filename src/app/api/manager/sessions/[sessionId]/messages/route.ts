@@ -14,6 +14,23 @@ async function requireManagerUser() {
   return user;
 }
 
+export async function GET(request: Request, context: { params: Promise<{ sessionId: string }> }) {
+  try {
+    const [user, params] = await Promise.all([requireManagerUser(), context.params]);
+    const session = await prisma.managerChatSession.findFirst({ where: { id: params.sessionId, userId: user.id }, select: { id: true } });
+    if (!session) return NextResponse.json({ error: "MANAGER_SESSION_NOT_FOUND" }, { status: 404 });
+    const before = new URL(request.url).searchParams.get("before");
+    const rows = await prisma.managerChatMessage.findMany({ where: { sessionId: session.id }, ...(before ? { cursor: { id: before }, skip: 1 } : {}), orderBy: { createdAt: "desc" }, take: 51 });
+    const hasMore = rows.length > 50;
+    const messages = rows.slice(0, 50).reverse();
+    return NextResponse.json({ messages: messages.map((message) => ({ id: message.id, role: message.role, source: message.source, content: message.content, createdAt: message.createdAt.toISOString() })), hasMore, nextCursor: hasMore ? messages[0]?.id ?? null : null }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MANAGER_MESSAGE_LIST_FAILED";
+    const status = message === "FORBIDDEN" ? 403 : message === "UNAUTHENTICATED" || message === "PASSWORD_CHANGE_REQUIRED" ? 401 : 400;
+    return NextResponse.json({ error: message === "FORBIDDEN" ? message : "MANAGER_MESSAGE_LIST_FAILED" }, { status });
+  }
+}
+
 export async function POST(request: Request, context: { params: Promise<{ sessionId: string }> }) {
   try {
     assertSameOrigin(request);

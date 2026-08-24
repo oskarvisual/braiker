@@ -13,11 +13,15 @@ export const managerReportSchedules = [
 type ReportCounts = {
   bots: { on: number; off: number; dead: number };
   orders: { total: number; filled: number; rejected: number; inProgress: number };
+  scans: { completed: number; skipped: number; errors: number; botsWithoutScan: string[] };
+  briefings: Array<{ marketDate: string; botInputs: number; resources: Array<{ category: string; title: string }> }>;
+  macro: { created: Array<{ title: string; startsAt: string }>; upcoming: Array<{ title: string; startsAt: string }> };
+  botActivity: Array<{ name: string; status: string; reason: string }>;
 };
 
 type ReportInput = ReportCounts & { cadence: ManagerReportCadence; generatedAt: Date };
 
-export type BotManagerReportDb = Pick<PrismaClient, "botInstance" | "order" | "notificationAlert">;
+export type BotManagerReportDb = Pick<PrismaClient, "botInstance" | "order" | "botScanRun" | "dailyMarketBrief" | "macroCalendarEvent" | "notificationAlert">;
 
 const reportConfiguration = {
   DAILY: { eventType: "BOT_MANAGER_DAILY_REPORT", label: "Daily" },
@@ -47,15 +51,36 @@ function periodStart(cadence: ManagerReportCadence, generatedAt: Date) {
   return new Date(generatedAt.getTime() - durationMs);
 }
 
+function compactReportText(value: string, maximum = 96) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maximum ? `${normalized.slice(0, maximum - 1)}…` : normalized;
+}
+
 export function buildBotManagerReport(input: ReportInput) {
   const configuration = reportConfiguration[input.cadence];
   const period = reportPeriodKey(input.cadence, input.generatedAt);
   const start = periodStart(input.cadence, input.generatedAt);
+  const briefingSummary = input.briefings.length
+    ? input.briefings.slice(0, 2).map((briefing) => `briefing ${briefing.marketDate} distributed cautious context to ${briefing.botInputs} bots from ${briefing.resources.length} sources (${briefing.resources.slice(0, 3).map((resource) => `${compactReportText(resource.category, 24)}: ${compactReportText(resource.title)}`).join("; ") || "no reviewed sources"})`).join(" ")
+    : "no daily briefing was generated in this reporting window";
+  const macroCreated = input.macro.created.length ? input.macro.created.slice(0, 3).map((event) => `${compactReportText(event.title)} (${event.startsAt})`).join("; ") : "none";
+  const macroUpcoming = input.macro.upcoming.length ? input.macro.upcoming.slice(0, 3).map((event) => `${compactReportText(event.title)} (${event.startsAt})`).join("; ") : "none in the next 48 hours";
+  const latestActivity = input.botActivity.length ? input.botActivity.slice(0, 6).map((activity) => `${compactReportText(activity.name, 48)}: ${activity.status.toLowerCase()} (${compactReportText(activity.reason.replaceAll("_", " ").toLowerCase(), 48)})`).join("; ") : "no bot scan activity recorded";
+  const message = [
+    `${configuration.label} paper-only report for ${period}.`,
+    `Paper-only fleet: ${input.bots.on} on, ${input.bots.off} off, ${input.bots.dead} dead.`,
+    `Orders: ${input.orders.total} total, ${input.orders.filled} filled, ${input.orders.rejected} rejected, ${input.orders.inProgress} in progress.`,
+    `Resources: ${briefingSummary}.`,
+    `Macro added: ${macroCreated}.`,
+    `Upcoming macro guard: ${macroUpcoming}.`,
+    `Bot scans: ${input.scans.completed} completed, ${input.scans.skipped} skipped, ${input.scans.errors} errors.${input.scans.botsWithoutScan.length ? ` No scan: ${input.scans.botsWithoutScan.slice(0, 6).map((name) => compactReportText(name, 48)).join(", ")}.` : ""}`,
+    `Bot activity: ${latestActivity}.`,
+  ].join("\n");
   return {
     eventType: configuration.eventType,
     dedupeKey: `bot-manager-report:${input.cadence.toLowerCase()}:${period}`,
     subject: `${configuration.label} Bot Manager report`,
-    message: `${configuration.label} paper-only report for ${period}. Paper-only: ${input.bots.on} on, ${input.bots.off} off, ${input.bots.dead} dead. Orders: ${input.orders.total} total, ${input.orders.filled} filled, ${input.orders.rejected} rejected, ${input.orders.inProgress} in progress.`,
+    message,
     metadata: {
       cadence: input.cadence,
       period,
@@ -63,6 +88,10 @@ export function buildBotManagerReport(input: ReportInput) {
       windowEnd: input.generatedAt.toISOString(),
       bots: input.bots,
       orders: input.orders,
+      scans: input.scans,
+      briefings: input.briefings,
+      macro: input.macro,
+      botActivity: input.botActivity,
     },
   };
 }
@@ -87,14 +116,41 @@ function countOrders(groups: Array<{ status: string; _count: { _all: number } }>
   }, { total: 0, filled: 0, rejected: 0, inProgress: 0 });
 }
 
+function countScans(scans: Array<{ status: string }>, botsWithoutScan: string[]) {
+  return scans.reduce<ReportCounts["scans"]>((counts, scan) => {
+    if (scan.status === "COMPLETED") counts.completed += 1;
+    else if (scan.status === "ERROR") counts.errors += 1;
+    else counts.skipped += 1;
+    return counts;
+  }, { completed: 0, skipped: 0, errors: 0, botsWithoutScan });
+}
+
 /** Creates one durable, idempotent Bot Manager summary for a reporting cadence. */
 export async function publishBotManagerReport(cadence: ManagerReportCadence, generatedAt = new Date(), db: BotManagerReportDb = prisma) {
   const start = periodStart(cadence, generatedAt);
-  const [botGroups, orderGroups] = await Promise.all([
+  const upcomingEnd = new Date(generatedAt.getTime() + 48 * 60 * 60_000);
+  const [botGroups, bots, orderGroups, scans, briefs, macroCreated, macroUpcoming] = await Promise.all([
     db.botInstance.groupBy({ by: ["runMode", "lifeStatus"], _count: { _all: true } }),
+    db.botInstance.findMany({ select: { id: true, name: true, lifeStatus: true } }),
     db.order.groupBy({ by: ["status"], where: { createdAt: { gte: start, lte: generatedAt } }, _count: { _all: true } }),
+    db.botScanRun.findMany({ where: { startedAt: { gte: start, lte: generatedAt } }, select: { botId: true, status: true, reason: true, startedAt: true }, orderBy: { startedAt: "desc" }, take: 500 }),
+    db.dailyMarketBrief.findMany({ where: { generatedAt: { gte: start, lte: generatedAt } }, select: { marketDate: true, resources: { select: { source: { select: { category: true } }, snapshot: { select: { title: true } } } }, _count: { select: { botInputs: true } } }, orderBy: { generatedAt: "desc" }, take: 7 }),
+    db.macroCalendarEvent.findMany({ where: { createdAt: { gte: start, lte: generatedAt }, impact: "HIGH" }, select: { title: true, startsAt: true }, orderBy: { createdAt: "desc" }, take: 8 }),
+    db.macroCalendarEvent.findMany({ where: { startsAt: { gte: generatedAt, lte: upcomingEnd }, impact: "HIGH" }, select: { title: true, startsAt: true }, orderBy: { startsAt: "asc" }, take: 8 }),
   ]);
-  const report = buildBotManagerReport({ cadence, generatedAt, bots: countBots(botGroups), orders: countOrders(orderGroups) });
+  const latestScanByBot = new Map<string, (typeof scans)[number]>();
+  for (const scan of scans) if (!latestScanByBot.has(scan.botId)) latestScanByBot.set(scan.botId, scan);
+  const botsWithoutScan = bots.filter((bot) => bot.lifeStatus === "ACTIVE" && !latestScanByBot.has(bot.id)).map((bot) => bot.name);
+  const report = buildBotManagerReport({
+    cadence,
+    generatedAt,
+    bots: countBots(botGroups),
+    orders: countOrders(orderGroups),
+    scans: countScans(scans, botsWithoutScan),
+    briefings: briefs.map((brief) => ({ marketDate: brief.marketDate.toISOString().slice(0, 10), botInputs: brief._count.botInputs, resources: brief.resources.map((resource) => ({ category: resource.source.category, title: resource.snapshot.title })) })),
+    macro: { created: macroCreated.map((event) => ({ title: event.title, startsAt: event.startsAt.toISOString() })), upcoming: macroUpcoming.map((event) => ({ title: event.title, startsAt: event.startsAt.toISOString() })) },
+    botActivity: bots.map((bot) => ({ name: bot.name, status: latestScanByBot.get(bot.id)?.status ?? "NO_SCAN", reason: latestScanByBot.get(bot.id)?.reason ?? "NO_ACTIVITY" })).sort((left, right) => left.name.localeCompare(right.name))
+  });
   return db.notificationAlert.upsert({
     where: { dedupeKey: report.dedupeKey },
     create: {
