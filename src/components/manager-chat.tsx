@@ -28,10 +28,15 @@ export function managerActionSummary(proposal: ManagerActionProposal) {
   return `This will ${operation} ${proposal.botName} in Paper mode. BrAIker will revalidate permissions, lifecycle state, risk status, and the Kill Switch when you confirm.`;
 }
 
-function retainOlderMessages(previous: ManagerMessage[], fresh: ManagerMessage[]) {
+function messageIdentity(message: Pick<ManagerMessage, "role" | "source" | "content">) {
+  return `${message.role}:${message.source}:${message.content}`;
+}
+
+export function reconcileManagerMessages(previous: ManagerMessage[], fresh: ManagerMessage[]) {
   const earliestFresh = fresh[0]?.createdAt;
   if (!earliestFresh) return fresh;
-  return [...previous.filter((message) => message.createdAt < earliestFresh), ...fresh];
+  const persistedIdentities = new Set(fresh.map(messageIdentity));
+  return [...previous.filter((message) => message.createdAt < earliestFresh && !(message.id.startsWith("local-") && persistedIdentities.has(messageIdentity(message)))), ...fresh];
 }
 
 export function ManagerChat({ initialSessions, initialActionProposals = [], initialLearningProposals = [] }: { initialSessions: ManagerSession[]; initialActionProposals?: ManagerActionProposal[]; initialLearningProposals?: LearningProposal[] }) {
@@ -62,7 +67,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
 
     setSessions((current) => payload.sessions!.map((next) => {
       const previous = current.find((session) => session.id === next.id);
-      return previous ? { ...next, messages: retainOlderMessages(previous.messages, next.messages) } : next;
+      return previous ? { ...next, messages: reconcileManagerMessages(previous.messages, next.messages) } : next;
     }));
     setSelectedId((current) => synchronizeManagerSessions(current, payload.sessions ?? []).selectedId);
     setActionProposals(payload.actionProposals ?? []);

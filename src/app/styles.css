@@ -124,7 +124,7 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 @media (max-width:800px) { .macroCalendarTabs,.macroCalendarPagination { grid-template-columns:1fr; }.macroCalendarPagination button:last-child { justify-self:stretch; }.macroCalendarPagination span { grid-row:1; }.macroCalendarPagination button { width:100%; }.macroCalendarEmpty { min-height:150px; } }
 
 /* Both manager and local-bot chats use the same compact, auto-growing composer. */
-.managerMessages { align-content:stretch; }
+.managerMessages { align-content:start; }
 .managerEmpty { justify-self:center; align-self:center; width:min(100%,560px); margin:auto; }
 .managerComposer > div { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:stretch; gap:12px; }
 .managerComposer textarea { min-height:48px; max-height:168px; padding:12px; resize:none; overflow-y:hidden; }

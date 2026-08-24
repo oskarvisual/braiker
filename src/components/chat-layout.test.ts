@@ -12,6 +12,7 @@ describe("shared chat layout", () => {
     expect(styles).toContain(".managerComposer button { align-self:end; min-width:118px; height:48px;");
     expect(styles).toContain(".managerComposer textarea { min-height:48px;");
     expect(styles).toContain("max-height:168px;");
+    expect(styles).toContain(".managerMessages { align-content:start; }");
   });
 
   it("keeps conversation history in its own bounded, contained scroll area", () => {

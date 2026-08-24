@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { managerActionSummary, synchronizeManagerSessions, type ManagerSession } from "@/components/manager-chat";
+import { managerActionSummary, reconcileManagerMessages, synchronizeManagerSessions, type ManagerSession } from "@/components/manager-chat";
 
 const operationsSession: ManagerSession = {
   id: "operations-1",
@@ -39,6 +39,13 @@ describe("synchronizeManagerSessions", () => {
     const synchronized = synchronizeManagerSessions("removed-session", [operationsSession]);
 
     expect(synchronized.selectedId).toBe("operations-1");
+  });
+
+  it("replaces a temporary local message with its persisted equivalent after a reply", () => {
+    const local = { id: "local-123", role: "USER" as const, source: "WEB" as const, content: "give me report system", createdAt: "2026-08-24T16:00:00.000Z" };
+    const persisted = { ...local, id: "message-123", createdAt: "2026-08-24T16:00:00.100Z" };
+
+    expect(reconcileManagerMessages([local], [persisted])).toEqual([persisted]);
   });
 
   it("renders the paper-only impact of a pending Manager power proposal", () => {
