@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
 import { useToast } from "@/components/toast";
 import { AssistantMarkdown } from "@/components/assistant-markdown";
+import { chatTitleEditorCommand } from "@/components/chat-title-editor";
 
 export type ManagerMessage = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; source: "WEB" | "TELEGRAM" | "TELEGRAM_ALERT" | "SYSTEM"; content: string; createdAt: string };
 export type ManagerSession = { id: string; title: string; kind: "OPERATIONS" | "CONVERSATION"; pinned: boolean; updatedAt: string; messages: ManagerMessage[] };
@@ -164,6 +165,24 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     }
   }
 
+  function startRenaming(session: ManagerSession) {
+    if (session.pinned) return;
+    setSelectedId(session.id);
+    setRenameTitle(session.title);
+    setRenamingSessionId(session.id);
+  }
+
+  function handleRenameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    const command = chatTitleEditorCommand(event.key);
+    if (!command) return;
+    event.preventDefault();
+    if (command === "CANCEL") {
+      setRenamingSessionId(null);
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
+  }
+
   async function archiveConversation(session: ManagerSession) {
     try {
       await updateConversation(session, "ARCHIVE");
@@ -242,13 +261,12 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
             <button type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => { stickToLatestRef.current = true; setSelectedId(session.id); }}>
               <strong>{session.pinned ? "📌 " : ""}{session.title}</strong><small>{session.kind === "OPERATIONS" ? "Telegram alerts and operations" : "Manual conversation"}</small>
             </button>
-            {!session.pinned && <div className="managerSessionActions"><button type="button" aria-label={`Rename ${session.title}`} onClick={() => { setSelectedId(session.id); setRenameTitle(session.title); setRenamingSessionId(session.id); }}>Rename</button><button type="button" aria-label={`Archive ${session.title}`} onClick={() => void archiveConversation(session)}>Archive</button></div>}
           </div>)}
         </div>
       </aside>
       <section className="managerConversation" aria-live="polite">
         {selected ? <>
-          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p>{renamingSessionId === selected.id ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} autoFocus /><button type="submit">Save</button><button type="button" className="secondaryButton" onClick={() => setRenamingSessionId(null)}>Cancel</button></form> : <h2>{selected.title}</h2>}</div><span>Confirmation required</span></div>
+          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p>{renamingSessionId === selected.id ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} onKeyDown={handleRenameKeyDown} autoFocus /></form> : <h2 className={selected.pinned ? undefined : "chatTitle"} onDoubleClick={() => startRenaming(selected)}>{selected.title}</h2>}</div><div className="managerConversationStatus"><span>Confirmation required</span>{!selected.pinned && <button type="button" className="chatArchiveButton" onClick={() => void archiveConversation(selected)}>Archive</button>}</div></div>
           <div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlderMessages(); }}>
             {loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}
             {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small>{message.role === "ASSISTANT" ? <div className="managerMessageContent"><AssistantMarkdown content={message.content} /></div> : <p>{message.content}</p>}</article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
