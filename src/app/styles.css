@@ -76,6 +76,14 @@ button:disabled { background:#294739; color:#9eb6a7; opacity:1; }
 .notificationChannel { width:100%; }
 .notificationActions { grid-column:auto; }
 
+/* Session controls live in the open conversation, keeping the sidebar focused on navigation. */
+.chatTitle { cursor:text; }
+.chatTitleEditor { display:flex; flex-wrap:nowrap; gap:0; }
+.managerConversationStatus { display:grid; justify-items:end; gap:7px; }
+.managerConversationStatus > span { padding:6px 9px; border:1px solid #39546b; border-radius:999px; color:#9db2c4; font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+.chatArchiveButton { min-height:0; width:auto; padding:3px 5px; border:0; border-radius:5px; background:transparent; color:#9db2c4; font-size:.7rem; font-weight:750; }
+.chatArchiveButton:hover { color:var(--text); background:#243546; transform:none; }
+
 /* Individual bot conversations remain local to the dashboard and inherit the
    Manager chat language without implying manager-level authority. */
 .botChat { min-width:0; }.botChatLayout { min-height:520px; }.botChatCompact .botChatLayout { min-height:480px; border-radius:13px; }.botChatCompact .managerChatSidebar { padding:13px; }.botChatCompact .managerConversationHeader { padding:17px 20px 14px; }.botChatCompact .managerMessages { min-height:240px; padding:18px 20px; }.botChatCompact .managerComposer { padding:14px 20px 17px; }.botChatLocked { margin:6px 0 10px; padding:28px; border:1px dashed #40556c; border-radius:13px; background:#0d1720; }.botChatLocked h3 { margin:6px 0 8px; color:var(--text); }.botChatLocked p:last-child { max-width:660px; margin:0; color:var(--muted); line-height:1.55; }.botChatUnavailable { border-color:#d4a65f88; }.botChatUnavailable .eyebrow { color:#e4ba76; }
