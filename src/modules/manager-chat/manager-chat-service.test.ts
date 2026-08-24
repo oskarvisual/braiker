@@ -119,6 +119,45 @@ describe("Bot Manager chat service", () => {
     expect(result.reply).toContain("paused");
   });
 
+  it("returns a deterministic daily operating and current-system report without calling the provider", async () => {
+    const responder = { reply: vi.fn() };
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "operations" }) },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}) },
+      botInstance: {
+        groupBy: vi.fn().mockResolvedValue([{ runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", _count: { _all: 2 } }]),
+        findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Bob", lifeStatus: "ACTIVE" }]),
+      },
+      order: { groupBy: vi.fn().mockResolvedValue([{ status: "FILLED", _count: { _all: 1 } }]) },
+      botScanRun: {
+        groupBy: vi.fn()
+          .mockResolvedValueOnce([{ status: "COMPLETED", _count: { _all: 1 } }])
+          .mockResolvedValueOnce([{ botId: "bot-1", _count: { _all: 1 } }]),
+        findMany: vi.fn().mockResolvedValue([{ botId: "bot-1", status: "COMPLETED", reason: "ANALYZED", startedAt: new Date() }]),
+      },
+      dailyMarketBrief: { findMany: vi.fn().mockResolvedValue([]) },
+      macroCalendarEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const result = await sendManagerMessage({ userId: "user-1", sessionId: "operations", content: "reporte de sistema", actorRole: "ADMIN", requestedVia: "WEB" }, {
+      db: db as never,
+      responder,
+      aiEnabled: false,
+      systemStatus: async () => ({
+        checkedAt: new Date("2026-08-21T12:00:00.000Z"),
+        services: [{ id: "database", label: "MySQL database", state: "healthy", detail: "Connected and responding." }],
+        bots: { on: 2, off: 0, dead: 0 },
+        openAi: { quotaPaused: false, reactivationAllowed: false },
+      }),
+    });
+
+    expect(responder.reply).not.toHaveBeenCalled();
+    expect(result.reply).toContain("System report");
+    expect(result.reply).toContain("MySQL database: HEALTHY");
+    expect(result.reply).toContain("Daily operating report");
+    expect(result.reply).toContain("Bot scans: 1 completed");
+  });
+
   it("does not ask the provider twice when a Telegram update is replayed", async () => {
     const responder = { reply: vi.fn() };
     const db = {

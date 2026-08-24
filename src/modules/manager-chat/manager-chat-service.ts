@@ -8,16 +8,21 @@ import { createManagerMacroEvent } from "./manager-macro-event-service";
 import { parseManagerLearningCommand, recordLearnedInstruction } from "@/modules/bots/learned-instruction-service";
 import { globalPaperBroker } from "@/modules/broker/global-paper";
 import { managerMarketClockContext } from "./manager-market-context";
+import { buildManagerSystemReport, isSystemReportRequest } from "./system-report";
+import { getSystemStatus, type SystemStatus } from "@/modules/monitoring/system-status";
+import { buildBotManagerReport, collectBotManagerReportInput } from "@/modules/manager-reports/bot-manager-reports";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "botPosition" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext" | "botLearnedInstruction" | "resourceSource" | "macroCalendarEvent" | "auditLog">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "botPosition" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext" | "botLearnedInstruction" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
 };
+
+type ManagerChatDependencies = { db: ManagerChatDb; responder: ManagerResponder; aiEnabled: boolean; systemStatus?: () => Promise<SystemStatus> };
 
 type SendManagerMessageInput = {
   userId: string;
@@ -193,11 +198,20 @@ async function prepareManagerLearnedInstruction(input: { userId: string; content
   return { reply: result.created ? `Recorded internal caution rule revision ${result.instruction.revision} for ${bot.name}. It remains separate from Additional instructions and can only add caution or veto an AI review.` : `That exact internal rule is already the latest revision for ${bot.name}; no duplicate was recorded.` };
 }
 
+async function prepareManagerSystemReport(content: string, db: ManagerChatDb, status: () => Promise<SystemStatus>) {
+  if (!isSystemReportRequest(content)) return null;
+  const [systemStatus, dailyInput] = await Promise.all([
+    status(),
+    collectBotManagerReportInput("DAILY", new Date(), db),
+  ]);
+  return { reply: buildManagerSystemReport(systemStatus, buildBotManagerReport(dailyInput).message) };
+}
+
 /**
  * Stores a user message then produces a read-only response. Provider failures
  * cannot affect worker execution, risk, bot power, capital, or Kill Switches.
  */
-export async function sendManagerMessage(input: SendManagerMessageInput, dependencies: { db: ManagerChatDb; responder: ManagerResponder; aiEnabled: boolean }) {
+export async function sendManagerMessage(input: SendManagerMessageInput, dependencies: ManagerChatDependencies) {
   const session = await dependencies.db.managerChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId }, select: { id: true } });
   if (!session) throw new Error("MANAGER_SESSION_NOT_FOUND");
 
@@ -242,6 +256,11 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
     if (note) {
       await storeAssistantReply(session.id, note.reply, dependencies.db, replyReference);
       return { reply: note.reply, available: true };
+    }
+    const systemReport = await prepareManagerSystemReport(content, dependencies.db, dependencies.systemStatus ?? getSystemStatus);
+    if (systemReport) {
+      await storeAssistantReply(session.id, systemReport.reply, dependencies.db, replyReference);
+      return { reply: systemReport.reply, available: true };
     }
     if (input.actorRole !== "ADMIN") {
       const learning = parseManagerLearningCommand(content);

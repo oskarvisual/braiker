@@ -31,10 +31,33 @@ describe("Bot Manager reports", () => {
     expect(report.dedupeKey).toBe("bot-manager-report:daily:2026-08-21");
     expect(report.message).toContain("Paper-only fleet: 2 on, 1 off, 0 dead.");
     expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.");
-    expect(report.message).toContain("Resources: briefing 2026-08-21 distributed cautious context to 3 bots from 2 sources (MACRO: CPI release; NEWS: Market briefing).");
-    expect(report.message).toContain("Macro added: US CPI");
-    expect(report.message).toContain("Upcoming macro guard: Fed decision");
+    expect(report.message).toContain("Resources: 1 daily briefing distributed cautious context to 3 bot inputs. Reviewed sources: MACRO: CPI release; NEWS: Market briefing.");
+    expect(report.message).toContain("Macro added: 1 HIGH event: US CPI");
+    expect(report.message).toContain("Upcoming macro guard: 1 guard: Fed decision");
     expect(report.message).toContain("Bot scans: 4 completed, 1 skipped, 0 errors. No scan: Laura.");
+  });
+
+  it("summarizes every briefing in a weekly or monthly operating window while keeping examples bounded", () => {
+    const briefings = Array.from({ length: 8 }, (_, index) => ({
+      marketDate: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      botInputs: 3,
+      resources: [{ category: "MACRO", title: `Release ${index + 1}` }],
+    }));
+    const report = buildBotManagerReport({
+      cadence: "WEEKLY",
+      generatedAt: new Date("2026-08-21T21:45:00.000Z"),
+      bots: { on: 3, off: 0, dead: 0 },
+      orders: { total: 12, filled: 8, rejected: 2, inProgress: 2 },
+      scans: { completed: 60, skipped: 12, errors: 1, botsWithoutScan: [] },
+      briefings,
+      macro: { created: [{ title: "CPI", startsAt: "2026-08-20T12:30:00.000Z" }], upcoming: [{ title: "Jobs", startsAt: "2026-08-24T12:30:00.000Z" }] },
+      botActivity: [],
+    });
+
+    expect(report.message).toContain("Weekly paper-only report");
+    expect(report.message).toContain("Resources: 8 daily briefings distributed cautious context to 24 bot inputs.");
+    expect(report.message).toContain("Release 1");
+    expect(report.message).toContain("Macro added: 1 HIGH event");
   });
 
   it("upserts the period report without resetting completed delivery timestamps", async () => {
@@ -52,7 +75,12 @@ describe("Bot Manager reports", () => {
           { status: "REJECTED", _count: { _all: 1 } },
         ]),
       },
-      botScanRun: { findMany: vi.fn().mockResolvedValue([{ botId: "bot-1", status: "COMPLETED", reason: "ANALYZED", startedAt: new Date() }]) },
+      botScanRun: {
+        groupBy: vi.fn()
+          .mockResolvedValueOnce([{ status: "COMPLETED", _count: { _all: 1 } }])
+          .mockResolvedValueOnce([{ botId: "bot-1", _count: { _all: 1 } }]),
+        findMany: vi.fn().mockResolvedValue([{ botId: "bot-1", status: "COMPLETED", reason: "ANALYZED", startedAt: new Date() }]),
+      },
       dailyMarketBrief: { findMany: vi.fn().mockResolvedValue([]) },
       macroCalendarEvent: { findMany: vi.fn().mockResolvedValue([]) },
       notificationAlert: { upsert: vi.fn().mockResolvedValue({ id: "report-1" }) },
