@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/modules/auth/session";
 import { createResourceReview, updateResourceReview } from "@/modules/resources/resource-service";
 import { resourceCategories } from "@/modules/resources/resource-policy";
+import { pageResult, pageWindow } from "@/modules/pagination/page";
 
 const createSchema = z.object({ url: z.string().trim().max(190).url(), category: z.enum(resourceCategories) });
 const updateSchema = z.object({ id: z.string().uuid(), active: z.boolean().optional(), url: z.string().trim().max(190).url().optional(), category: z.enum(resourceCategories).optional() })
@@ -29,14 +30,33 @@ function publicSource(source: SourceWithSnapshots) {
   };
 }
 
-export async function GET() {
+function recommendations(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const items = (value as { recommendations?: unknown }).recommendations;
+  return Array.isArray(items) ? items.filter((item): item is string => typeof item === "string").slice(0, 8) : [];
+}
+
+function publicBrief(brief: Prisma.DailyMarketBriefGetPayload<{ include: { resources: { include: { source: { select: { name: true } }; snapshot: { select: { title: true; contentHash: true } } } }; botInputs: { include: { bot: { select: { name: true; templateId: true } } } } } }>) {
+  return {
+    id: brief.id, marketDate: brief.marketDate.toISOString(), status: brief.status, generatedAt: brief.generatedAt.toISOString(),
+    resources: brief.resources.map((resource) => ({ source: resource.source.name, title: resource.snapshot.title, hash: resource.snapshot.contentHash })),
+    botInputs: brief.botInputs.map((input) => ({ bot: input.bot.name, template: input.bot.templateId, recommendations: recommendations(input.content) }))
+  };
+}
+
+export async function GET(request: Request) {
   try {
     await requireAdmin();
-    const sources = await prisma.resourceSource.findMany({
-      orderBy: [{ category: "asc" }, { updatedAt: "desc" }],
-      include: { snapshots: { orderBy: { fetchedAt: "desc" }, take: 10 } }
-    });
-    return NextResponse.json({ sources: sources.map(publicSource) }, { headers: { "Cache-Control": "no-store" } });
+    const url = new URL(request.url);
+    const { page, skip, take } = pageWindow(url.searchParams.get("page"));
+    if (url.searchParams.get("section") === "briefs") {
+      const rows = await prisma.dailyMarketBrief.findMany({ orderBy: { marketDate: "desc" }, skip, take, include: { resources: { include: { source: { select: { name: true } }, snapshot: { select: { title: true, contentHash: true } } } }, botInputs: { include: { bot: { select: { name: true, templateId: true } } }, orderBy: { bot: { name: "asc" } } } } });
+      const result = pageResult(rows);
+      return NextResponse.json({ briefs: result.items.map(publicBrief), page, hasMore: result.hasMore }, { headers: { "Cache-Control": "no-store" } });
+    }
+    const rows = await prisma.resourceSource.findMany({ orderBy: [{ category: "asc" }, { updatedAt: "desc" }], skip, take, include: { snapshots: { orderBy: { fetchedAt: "desc" }, take: 1 } } });
+    const result = pageResult(rows);
+    return NextResponse.json({ sources: result.items.map(publicSource), page, hasMore: result.hasMore }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
     return NextResponse.json({ error: message === "FORBIDDEN" ? "FORBIDDEN" : "UNAUTHENTICATED" }, { status: message === "FORBIDDEN" ? 403 : 401 });
