@@ -50,6 +50,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const stickToLatestRef = useRef(true);
   const restoreScrollHeightRef = useRef<number | null>(null);
+  const sendInFlightRef = useRef(false);
 
   const refreshSessions = useCallback(async () => {
     const response = await fetch("/api/manager/sessions", {
@@ -135,7 +136,8 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || !selected || sending) return;
+    if (!content || !selected || sending || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     const localMessage: ManagerMessage = { id: `local-${Date.now()}`, role: "USER", source: "WEB", content, createdAt: new Date().toISOString() };
     setDraft("");
     setSending(true);
@@ -152,6 +154,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     } catch {
       pushToast({ tone: "error", title: "BrAIker could not answer", message: "No trading action was taken. Try again after checking AI status." });
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   }
@@ -190,7 +193,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       <div><p className="eyebrow">OPERATIONS ASSISTANT · CONFIRMATION REQUIRED</p><h1>Br<span>AI</span>ker</h1><p className="intro">Ask for explanations, or explicitly request “activate bot Name” / “turn off Name”. BrAIker prepares a Paper-only proposal and never applies it without your confirmation.</p></div>
       <button type="button" className="managerNewConversation" onClick={createConversation} disabled={creating}>{creating ? "Creating…" : "New chat"}</button>
     </header>
-    <div className="managerChatLayout">
+    <div className={`managerChatLayout ${selected?.messages.length ? "" : "emptyConversation"}`}>
       <aside className="managerChatSidebar" aria-label="Bot Manager conversations">
         <div className="managerChatSidebarTitle"><strong>Conversations</strong></div>
         <div className="managerSessionList">

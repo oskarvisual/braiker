@@ -4,7 +4,10 @@ const MAX_DETAIL_LENGTH = 180;
 
 export function isSystemReportRequest(content: string) {
   const normalized = content.trim().toLocaleLowerCase();
-  return normalized === "/status" || normalized === "/report" || /\b(?:system report|system status|reporte de sistema|reporte del sistema|estado del sistema)\b/i.test(normalized);
+  if (normalized === "/status" || normalized === "/report") return true;
+  const english = /\bsystem\b/.test(normalized) && /\b(?:report|status)\b/.test(normalized);
+  const spanish = /\bsistema\b/.test(normalized) && /\b(?:reporte|estado)\b/.test(normalized);
+  return english || spanish;
 }
 
 function compactDetail(value: string) {
