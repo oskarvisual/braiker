@@ -3,16 +3,60 @@ import {
   buildBotManagerReport,
   managerReportSchedules,
   publishBotManagerReport,
+  shouldPublishScheduledManagerReport,
 } from "./bot-manager-reports";
 import type { BotManagerReportDb } from "./bot-manager-reports";
 
 describe("Bot Manager reports", () => {
-  it("defines durable daily, weekly, and monthly New York report schedules", () => {
+  it("defines pre-market, closing, weekly, and monthly New York report schedules", () => {
     expect(managerReportSchedules).toEqual([
-      expect.objectContaining({ cadence: "DAILY", taskName: "bot-manager-daily-report", cronExpression: "35 16 * * *", timezone: "America/New_York" }),
+      expect.objectContaining({ cadence: "PREMARKET", taskName: "bot-manager-premarket-report", cronExpression: "35 8 * * 1-5", timezone: "America/New_York" }),
+      expect.objectContaining({ cadence: "DAILY", taskName: "bot-manager-early-close-report", cronExpression: "5 13 * * 1-5", timezone: "America/New_York" }),
+      expect.objectContaining({ cadence: "DAILY", taskName: "bot-manager-closing-report", cronExpression: "5 16 * * 1-5", timezone: "America/New_York" }),
       expect.objectContaining({ cadence: "WEEKLY", taskName: "bot-manager-weekly-report", cronExpression: "45 16 * * 5", timezone: "America/New_York" }),
       expect.objectContaining({ cadence: "MONTHLY", taskName: "bot-manager-monthly-report", cronExpression: "0 17 1 * *", timezone: "America/New_York" }),
     ]);
+  });
+
+  it("keeps the closing report scoped to the current New York market day", () => {
+    const report = buildBotManagerReport({
+      cadence: "DAILY",
+      generatedAt: new Date("2026-08-21T20:05:00.000Z"),
+      bots: { on: 1, off: 0, dead: 0 },
+      orders: { total: 0, filled: 0, rejected: 0, inProgress: 0 },
+      scans: { completed: 0, skipped: 0, errors: 0, botsWithoutScan: [] },
+      briefings: [], macro: { created: [], upcoming: [] }, botActivity: [],
+    });
+
+    expect(report.subject).toBe("Closing Bot Manager report");
+    expect(report.message).toContain("Reporting window: the current New York market day, beginning 2026-08-21T04:00:00.000Z and ending 2026-08-21T20:05:00.000Z.");
+  });
+
+  it("builds a pre-market report for the prior completed weekday without changing daily report delivery preferences", () => {
+    const report = buildBotManagerReport({
+      cadence: "PREMARKET",
+      generatedAt: new Date("2026-08-24T12:35:00.000Z"),
+      bots: { on: 1, off: 0, dead: 0 },
+      orders: { total: 0, filled: 0, rejected: 0, inProgress: 0 },
+      scans: { completed: 0, skipped: 0, errors: 0, botsWithoutScan: [] },
+      briefings: [], macro: { created: [], upcoming: [] }, botActivity: [],
+    });
+
+    expect(report.eventType).toBe("BOT_MANAGER_DAILY_REPORT");
+    expect(report.subject).toBe("Pre-market Bot Manager report");
+    expect(report.dedupeKey).toBe("bot-manager-report:premarket:2026-08-24");
+    expect(report.message).toContain("Reporting window: the previous completed weekday through pre-market, beginning 2026-08-21T04:00:00.000Z and ending 2026-08-24T12:35:00.000Z.");
+  });
+
+  it("does not publish the pre-market or closing report without that day's exchange-session briefing", () => {
+    expect(shouldPublishScheduledManagerReport("PREMARKET", false)).toBe(false);
+    expect(shouldPublishScheduledManagerReport("DAILY", false, false)).toBe(false);
+    expect(shouldPublishScheduledManagerReport("PREMARKET", true)).toBe(true);
+    expect(shouldPublishScheduledManagerReport("DAILY", true, true)).toBe(false);
+    expect(shouldPublishScheduledManagerReport("DAILY", true, false)).toBe(true);
+    expect(shouldPublishScheduledManagerReport("DAILY", true)).toBe(false);
+    expect(shouldPublishScheduledManagerReport("WEEKLY", false)).toBe(true);
+    expect(shouldPublishScheduledManagerReport("MONTHLY", false)).toBe(true);
   });
 
   it("builds a daily paper-only report with a deterministic period key", () => {
@@ -29,7 +73,7 @@ describe("Bot Manager reports", () => {
 
     expect(report.eventType).toBe("BOT_MANAGER_DAILY_REPORT");
     expect(report.dedupeKey).toBe("bot-manager-report:daily:2026-08-21");
-    expect(report.message).toContain("Reporting window: the preceding 24 hours, ending 2026-08-21T21:35:00.000Z.\n\nPaper-only fleet:");
+    expect(report.message).toContain("Closing paper-only report for 2026-08-21.\nReporting window: the current New York market day, beginning 2026-08-21T04:00:00.000Z and ending 2026-08-21T21:35:00.000Z.\n\nPaper-only fleet:");
     expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.\n\nResources:");
     expect(report.message).toContain("Paper-only fleet: 2 on, 1 off, 0 dead.");
     expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.");
