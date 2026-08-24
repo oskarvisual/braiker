@@ -17,4 +17,11 @@ describe("bot chat copy", () => {
     expect(component).toContain("&before=${encodeURIComponent(data.nextCursor)}");
     expect(component).toContain("Loading earlier messages…");
   });
+
+  it("guards a local bot-chat send synchronously so one submit cannot create duplicate messages", () => {
+    const component = readFileSync(resolve(process.cwd(), "src/components/bot-chat.tsx"), "utf8");
+
+    expect(component).toContain("const sendInFlightRef = useRef(false)");
+    expect(component).toContain("if (!content || sending || sendInFlightRef.current || !selectedSessionId || !active) return;");
+  });
 });

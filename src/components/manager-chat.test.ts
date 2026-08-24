@@ -59,4 +59,12 @@ describe("synchronizeManagerSessions", () => {
     expect(component).toContain("/api/manager/sessions/${selected.id}/messages?before=");
     expect(component).toContain("Loading earlier messages…");
   });
+
+  it("guards a web send synchronously so one submit cannot create duplicate messages", () => {
+    const component = readFileSync(resolve(process.cwd(), "src/components/manager-chat.tsx"), "utf8");
+
+    expect(component).toContain("const sendInFlightRef = useRef(false)");
+    expect(component).toContain("if (!content || !selected || sending || sendInFlightRef.current) return;");
+    expect(component).toContain("sendInFlightRef.current = true;");
+  });
 });

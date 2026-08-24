@@ -20,6 +20,7 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const stickToLatestRef = useRef(true);
   const restoreScrollHeightRef = useRef<number | null>(null);
+  const sendInFlightRef = useRef(false);
   const active = data?.active ?? initialActive ?? false;
   const composerRef = useAutoResizingComposer(draft);
 
@@ -94,7 +95,8 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   async function submit(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || sending || !selectedSessionId || !active) return;
+    if (!content || sending || sendInFlightRef.current || !selectedSessionId || !active) return;
+    sendInFlightRef.current = true;
     setDraft(""); setSending(true); stickToLatestRef.current = true;
     const optimistic: Message = { id: `local-${Date.now()}`, role: "USER", content, createdAt: new Date().toISOString() };
     setData((current) => current ? { ...current, messages: [...current.messages, optimistic] } : current);
@@ -105,7 +107,7 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
       setData((current) => current ? { ...current, messages: [...current.messages, { id: `reply-${Date.now()}`, role: "ASSISTANT", content: `${payload.reply}${payload.addedToDailyContext ? "\n\nAdded as cautious context for today only." : ""}`, createdAt: new Date().toISOString() }] } : current);
     } catch {
       await load(selectedSessionId).catch(() => undefined);
-    } finally { setSending(false); }
+    } finally { sendInFlightRef.current = false; setSending(false); }
   }
 
   if (loadFailed && !data) return <section className="botChatLocked botChatUnavailable" role="alert"><p className="eyebrow">LOCAL BOT CHAT</p><h3>Chat is temporarily unavailable</h3><p>The bot state was not changed. Reload this view and try again; if the issue continues, check the worker and database status.</p></section>;
@@ -113,7 +115,7 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
 
   return <section className={`botChat ${compact ? "botChatCompact" : ""}`}>
     {!compact && <header className="managerChatHeading"><div><p className="eyebrow">LOCAL BOT CHAT</p><h1>{botName}</h1><p className="intro">Ask about this bot’s analysis. Start a message with <strong>Important:</strong> only to add cautious context for today; it can never issue an order or relax a control.</p></div></header>}
-    <div className="managerChatLayout botChatLayout">
+    <div className={`managerChatLayout botChatLayout ${data?.messages.length ? "" : "emptyConversation"}`}>
       <aside className="managerChatSidebar"><div className="managerChatSidebarTitle"><span>Sessions</span><button type="button" className="inlineAction" onClick={() => void createSession()} disabled={sending}>New</button></div><small>Context and notes for this bot.</small><div className="managerSessionList">{data?.sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selectedSessionId === session.id ? "selected" : ""}`} onClick={() => void load(session.id)}><strong>{session.title}</strong><small>{session.kind === "MANAGER_NOTE" ? "Bot Manager note" : "Private conversation"}</small></button>)}</div></aside>
       <div className="managerConversation"><header className="managerConversationHeader"><div><p className="eyebrow">{data?.sessions.find((session) => session.id === selectedSessionId)?.kind === "MANAGER_NOTE" ? "MANAGER NOTE" : "CONTEXTUAL SESSION"}</p><h2>{data?.sessions.find((session) => session.id === selectedSessionId)?.title ?? "Choose or create a session"}</h2></div><span>Paper-only</span></header><div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlder(); }}>{loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}{data?.messages.length ? data.messages.map((message) => <article key={message.id} className={`managerMessage ${message.role.toLowerCase()}`}><small>{message.role === "USER" ? "You" : message.role === "SYSTEM" ? "Bot Manager" : botName}</small><p>{message.content}</p></article>) : <div className="managerEmpty"><strong>No messages yet.</strong><p>Create a local session to ask why {botName} analyzed, rejected, or traded an opportunity.</p></div>}</div><form className="managerComposer" onSubmit={submit}><label htmlFor={`bot-chat-message-${botId}`}>Message {botName}</label><div><textarea ref={composerRef} id={`bot-chat-message-${botId}`} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} disabled={sending || !selectedSessionId} placeholder="Why did you skip this opportunity?" /><button type="submit" disabled={sending || !draft.trim() || !selectedSessionId}>{sending ? "Thinking…" : "Send"}</button></div><small>Use “Important: …” for a cautious, day-only note. It may defer a candidate, never create one.</small></form></div>
     </div>

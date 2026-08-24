@@ -4,6 +4,7 @@ import { buildManagerSystemReport, isSystemReportRequest } from "./system-report
 describe("Manager system report", () => {
   it("recognizes explicit English, Spanish, and slash-command system-report requests", () => {
     expect(isSystemReportRequest("system report")).toBe(true);
+    expect(isSystemReportRequest("give me report system")).toBe(true);
     expect(isSystemReportRequest("reporte de sistema")).toBe(true);
     expect(isSystemReportRequest("/status")).toBe(true);
     expect(isSystemReportRequest("/report")).toBe(true);
