@@ -21,9 +21,7 @@ export function buildManagerSystemReport(status: SystemStatus, dailyReport: stri
   return [
     `System report · checked ${status.checkedAt.toISOString()}.`,
     `Current bot fleet: ${status.bots.on} on, ${status.bots.off} off, ${status.bots.dead} dead.`,
-    "Service health:",
-    services,
-    "Daily operating report:",
-    dailyReport,
-  ].join("\n");
+    `Service health:\n${services}`,
+    `Daily operating report:\n${dailyReport}`,
+  ].join("\n\n");
 }

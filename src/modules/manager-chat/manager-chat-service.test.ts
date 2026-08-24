@@ -155,7 +155,7 @@ describe("Bot Manager chat service", () => {
     expect(result.reply).toContain("System report");
     expect(result.reply).toContain("MySQL database: HEALTHY");
     expect(result.reply).toContain("Daily operating report");
-    expect(result.reply).toContain("Bot scans: 1 completed");
+    expect(result.reply).toContain("Scans:\n1 completed");
   });
 
   it("does not ask the provider twice when a Telegram update is replayed", async () => {

@@ -29,12 +29,14 @@ describe("Bot Manager reports", () => {
 
     expect(report.eventType).toBe("BOT_MANAGER_DAILY_REPORT");
     expect(report.dedupeKey).toBe("bot-manager-report:daily:2026-08-21");
+    expect(report.message).toContain("Reporting window: the preceding 24 hours, ending 2026-08-21T21:35:00.000Z.\n\nPaper-only fleet:");
+    expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.\n\nResources:");
     expect(report.message).toContain("Paper-only fleet: 2 on, 1 off, 0 dead.");
     expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.");
-    expect(report.message).toContain("Resources: 1 daily briefing distributed cautious context to 3 bot inputs. Reviewed sources: MACRO: CPI release; NEWS: Market briefing.");
-    expect(report.message).toContain("Macro added: 1 HIGH event: US CPI");
-    expect(report.message).toContain("Upcoming macro guard: 1 guard: Fed decision");
-    expect(report.message).toContain("Bot scans: 4 completed, 1 skipped, 0 errors. No scan: Laura.");
+    expect(report.message).toContain("Resources:\n1 daily briefing distributed cautious context to 3 bot inputs.\nReviewed sources:\n- MACRO: CPI release\n- NEWS: Market briefing");
+    expect(report.message).toContain("Macro safety:\nAdded: 1 HIGH event: US CPI");
+    expect(report.message).toContain("Upcoming guard: 1 guard: Fed decision");
+    expect(report.message).toContain("Scans:\n4 completed, 1 skipped, 0 errors.\nNo scan: Laura.");
   });
 
   it("summarizes every briefing in a weekly or monthly operating window while keeping examples bounded", () => {
@@ -55,9 +57,9 @@ describe("Bot Manager reports", () => {
     });
 
     expect(report.message).toContain("Weekly paper-only report");
-    expect(report.message).toContain("Resources: 8 daily briefings distributed cautious context to 24 bot inputs.");
+    expect(report.message).toContain("Resources:\n8 daily briefings distributed cautious context to 24 bot inputs.");
     expect(report.message).toContain("Release 1");
-    expect(report.message).toContain("Macro added: 1 HIGH event");
+    expect(report.message).toContain("Added: 1 HIGH event");
   });
 
   it("upserts the period report without resetting completed delivery timestamps", async () => {

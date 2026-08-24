@@ -61,23 +61,21 @@ export function buildBotManagerReport(input: ReportInput) {
   const configuration = reportConfiguration[input.cadence];
   const period = reportPeriodKey(input.cadence, input.generatedAt);
   const start = periodStart(input.cadence, input.generatedAt);
+  const reviewedSources = Array.from(new Map(input.briefings.flatMap((briefing) => briefing.resources).map((resource) => [`${resource.category}:${resource.title}`, resource])).values()).slice(0, 6);
   const briefingSummary = input.briefings.length
-    ? `${input.briefings.length} daily briefing${input.briefings.length === 1 ? "" : "s"} distributed cautious context to ${input.briefings.reduce((total, briefing) => total + briefing.botInputs, 0)} bot inputs. Reviewed sources: ${Array.from(new Map(input.briefings.flatMap((briefing) => briefing.resources).map((resource) => [`${resource.category}:${resource.title}`, resource])).values()).slice(0, 6).map((resource) => `${compactReportText(resource.category, 24)}: ${compactReportText(resource.title)}`).join("; ") || "no reviewed sources"}`
+    ? `${input.briefings.length} daily briefing${input.briefings.length === 1 ? "" : "s"} distributed cautious context to ${input.briefings.reduce((total, briefing) => total + briefing.botInputs, 0)} bot inputs`
     : "no daily briefing was generated in this reporting window";
   const macroCreated = input.macro.created.length ? `${input.macro.created.length} HIGH event${input.macro.created.length === 1 ? "" : "s"}: ${input.macro.created.slice(0, 3).map((event) => `${compactReportText(event.title)} (${event.startsAt})`).join("; ")}` : "none";
   const macroUpcoming = input.macro.upcoming.length ? `${input.macro.upcoming.length} guard${input.macro.upcoming.length === 1 ? "" : "s"}: ${input.macro.upcoming.slice(0, 3).map((event) => `${compactReportText(event.title)} (${event.startsAt})`).join("; ")}` : "none in the next 48 hours";
   const latestActivity = input.botActivity.length ? input.botActivity.slice(0, 6).map((activity) => `${compactReportText(activity.name, 48)}: ${activity.status.toLowerCase()} (${compactReportText(activity.reason.replaceAll("_", " ").toLowerCase(), 48)})`).join("; ") : "no bot scan activity recorded";
   const message = [
-    `${configuration.label} paper-only report for ${period}.`,
-    `Reporting window: the preceding ${input.cadence === "DAILY" ? "24 hours" : input.cadence === "WEEKLY" ? "7 days" : "30 days"}, ending ${input.generatedAt.toISOString()}.`,
+    `${configuration.label} paper-only report for ${period}.\nReporting window: the preceding ${input.cadence === "DAILY" ? "24 hours" : input.cadence === "WEEKLY" ? "7 days" : "30 days"}, ending ${input.generatedAt.toISOString()}.`,
     `Paper-only fleet: ${input.bots.on} on, ${input.bots.off} off, ${input.bots.dead} dead.`,
     `Orders: ${input.orders.total} total, ${input.orders.filled} filled, ${input.orders.rejected} rejected, ${input.orders.inProgress} in progress.`,
-    `Resources: ${briefingSummary}.`,
-    `Macro added: ${macroCreated}.`,
-    `Upcoming macro guard: ${macroUpcoming}.`,
-    `Bot scans: ${input.scans.completed} completed, ${input.scans.skipped} skipped, ${input.scans.errors} errors.${input.scans.botsWithoutScan.length ? ` No scan: ${input.scans.botsWithoutScan.slice(0, 6).map((name) => compactReportText(name, 48)).join(", ")}.` : ""}`,
-    `Bot activity: ${latestActivity}.`,
-  ].join("\n");
+    `Resources:\n${briefingSummary}.${reviewedSources.length ? `\nReviewed sources:\n${reviewedSources.map((resource) => `- ${compactReportText(resource.category, 24)}: ${compactReportText(resource.title)}`).join("\n")}` : ""}`,
+    `Macro safety:\nAdded: ${macroCreated}.\nUpcoming guard: ${macroUpcoming}.`,
+    `Scans:\n${input.scans.completed} completed, ${input.scans.skipped} skipped, ${input.scans.errors} errors.${input.scans.botsWithoutScan.length ? `\nNo scan: ${input.scans.botsWithoutScan.slice(0, 6).map((name) => compactReportText(name, 48)).join(", ")}.` : ""}\nLatest activity: ${latestActivity}.`,
+  ].join("\n\n");
   return {
     eventType: configuration.eventType,
     dedupeKey: `bot-manager-report:${input.cadence.toLowerCase()}:${period}`,
