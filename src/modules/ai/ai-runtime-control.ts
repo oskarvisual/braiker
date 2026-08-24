@@ -15,9 +15,11 @@ export type AiRuntimeReactivationResult = { status: "ACTIVE" | "QUOTA_EXHAUSTED"
 
 /** The action sends one small non-trading request; it never guesses an OpenAI account balance. */
 export async function attemptAiRuntimeReactivation(overrides: Partial<ReactivationDependencies> = {}): Promise<AiRuntimeReactivationResult> {
-  const runtime = env();
   const dependencies: ReactivationDependencies = {
-    checkAvailability: overrides.checkAvailability ?? (() => new OpenAiAdvisor({ apiKey: runtime.OPENAI_API_KEY, model: runtime.OPENAI_MODEL, timeoutMs: runtime.OPENAI_TIMEOUT_MS }).checkAvailability()),
+    checkAvailability: overrides.checkAvailability ?? (() => {
+      const runtime = env();
+      return new OpenAiAdvisor({ apiKey: runtime.OPENAI_API_KEY, model: runtime.OPENAI_MODEL, timeoutMs: runtime.OPENAI_TIMEOUT_MS }).checkAvailability();
+    }),
     markActive: overrides.markActive ?? (() => enableAiRuntimeAfterAvailabilityCheck()),
     resolveQuotaAlert: overrides.resolveQuotaAlert ?? (() => resolveOpenAiQuotaAlert()),
     markQuotaDisabled: overrides.markQuotaDisabled ?? (() => disableAiRuntimeForQuota()),

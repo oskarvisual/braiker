@@ -23,7 +23,7 @@ describe("Manager system report", () => {
     }, "Daily paper-only report for 2026-08-21.\nBot scans: 4 completed.");
 
     expect(message).toContain("System report");
-    expect(message).toContain("MySQL database: HEALTHY — Connected and responding.");
+    expect(message).toContain("Service health:\nMySQL database: HEALTHY — Connected and responding.");
     expect(message).toContain("Worker: WARNING — Heartbeat is stale");
     expect(message).toContain("Daily operating report:\nDaily paper-only report");
     expect(message).not.toContain("password");
