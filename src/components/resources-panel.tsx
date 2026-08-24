@@ -11,8 +11,14 @@ type ResourceModal = { mode: "new" } | { mode: "edit"; source: ResourceView } | 
 function dateTime(value: string | null) { return value ? new Date(value).toLocaleString() : "Not read yet"; }
 export function resourceFormDraft(source?: ResourceView): ResourceDraft { return { url: source?.url ?? "", category: (source?.category as ResourceCategory | undefined) ?? "NEWS" }; }
 
-export function ResourcesPanel({ initialSources, initialBriefs }: { initialSources: ResourceView[]; initialBriefs: BriefView[] }) {
+export function ResourcesPanel({ initialSources, initialBriefs, initialSourceHasMore, initialBriefHasMore }: { initialSources: ResourceView[]; initialBriefs: BriefView[]; initialSourceHasMore: boolean; initialBriefHasMore: boolean }) {
   const [sources, setSources] = useState(initialSources);
+  const [briefs, setBriefs] = useState(initialBriefs);
+  const [sourcePage, setSourcePage] = useState(1);
+  const [briefPage, setBriefPage] = useState(1);
+  const [sourceHasMore, setSourceHasMore] = useState(initialSourceHasMore);
+  const [briefHasMore, setBriefHasMore] = useState(initialBriefHasMore);
+  const [loadingMore, setLoadingMore] = useState<"sources" | "briefs" | null>(null);
   const [modal, setModal] = useState<ResourceModal>(null);
   const [draft, setDraft] = useState<ResourceDraft>(resourceFormDraft());
   const [notice, setNotice] = useState<string | null>(null);
@@ -47,6 +53,19 @@ export function ResourcesPanel({ initialSources, initialBriefs }: { initialSourc
     setSources((current) => current.map((item) => item.id === source.id ? { ...item, active: payload.active, reviewStatus: payload.reviewStatus } : item));
   }
 
+  async function loadMore(section: "sources" | "briefs") {
+    if (loadingMore) return;
+    setLoadingMore(section);
+    try {
+      const page = section === "sources" ? sourcePage + 1 : briefPage + 1;
+      const response = await fetch(`/api/resources?section=${section}&page=${page}`, { cache: "no-store" });
+      const payload = await response.json() as { sources?: ResourceView[]; briefs?: BriefView[]; hasMore?: boolean };
+      if (!response.ok) throw new Error("RESOURCE_PAGE_FAILED");
+      if (section === "sources") { setSources((current) => [...current, ...(payload.sources ?? [])]); setSourcePage(page); setSourceHasMore(payload.hasMore ?? false); }
+      else { setBriefs((current) => [...current, ...(payload.briefs ?? [])]); setBriefPage(page); setBriefHasMore(payload.hasMore ?? false); }
+    } finally { setLoadingMore(null); }
+  }
+
   const visible = sources.filter((source) => `${source.name} ${source.category} ${source.hostname}`.toLowerCase().includes(query.toLowerCase()));
   return <section className="resourcesPanel">
     <header className="resourcesHeading"><div><p className="eyebrow">ADMIN RESOURCE LIBRARY</p><h1>Resources</h1><p className="pageLead">Trusted market context, reviewed at the source. Links stay untrusted input; no files or credentials are stored.</p></div><button type="button" className="headerAction" onClick={openNew}>New resource</button></header>
@@ -59,8 +78,9 @@ export function ResourcesPanel({ initialSources, initialBriefs }: { initialSourc
       <div className="resourceActions"><div><button type="button" className="secondaryButton" onClick={() => openEdit(source)}>Edit</button><button type="button" className={source.active ? "textDangerButton" : "secondaryButton"} onClick={() => void setActive(source, !source.active)}>{source.active ? "Pause" : "Activate"}</button></div><small>{source.autoActivated ? "Trusted registry domain" : "Review required"}</small></div>
       {source.snapshots[0] && <details><summary>Latest captured evidence</summary><p><strong>{source.snapshots[0].title}</strong> · {dateTime(source.snapshots[0].fetchedAt)}</p><p>{source.snapshots[0].summary ?? source.snapshots[0].excerpt}</p><small>Hash: {source.snapshots[0].contentHash}</small></details>}
     </article>)}</div>
+    {sourceHasMore && <div className="paginationControls"><button type="button" className="secondaryButton" onClick={() => void loadMore("sources")} disabled={loadingMore !== null}>{loadingMore === "sources" ? "Loading…" : "Load more resources"}</button></div>}
     {visible.length === 0 && <div className="resourceEmpty"><strong>No matching resources</strong><p>Try a broader search or add a public HTTPS source.</p></div>}
-    <section className="resourceBriefs"><p className="eyebrow">IMMUTABLE PRE-MARKET BRIEFINGS</p><h2>Briefing history</h2>{initialBriefs.length ? initialBriefs.map((brief) => <details key={brief.id}><summary>{new Date(brief.marketDate).toLocaleDateString()} · {brief.resources.length} cited snapshots · {brief.botInputs.length} bot inputs · {brief.status}</summary><p>Generated {dateTime(brief.generatedAt)}. This briefing may block or defer a candidate only; it cannot create a trade or relax a control.</p><ul>{brief.resources.map((resource) => <li key={`${brief.id}-${resource.hash}`}>{resource.source}: {resource.title} <small>{resource.hash}</small></li>)}</ul>{brief.botInputs.length > 0 && <div className="briefBotInputs"><strong>Bot recommendations</strong>{brief.botInputs.map((input) => <article key={`${brief.id}-${input.bot}`}><p><strong>{input.bot}</strong> <small>{input.template}</small></p><ul>{input.recommendations.map((recommendation) => <li key={recommendation}>{recommendation}</li>)}</ul></article>)}</div>}</details>) : <p className="muted">The first exchange-day briefing will appear after the 08:30 ET worker run.</p>}</section>
+    <section className="resourceBriefs"><p className="eyebrow">IMMUTABLE PRE-MARKET BRIEFINGS</p><h2>Briefing history</h2>{briefs.length ? briefs.map((brief) => <details key={brief.id}><summary>{new Date(brief.marketDate).toLocaleDateString()} · {brief.resources.length} cited snapshots · {brief.botInputs.length} bot inputs · {brief.status}</summary><p>Generated {dateTime(brief.generatedAt)}. This briefing may block or defer a candidate only; it cannot create a trade or relax a control.</p><ul>{brief.resources.map((resource) => <li key={`${brief.id}-${resource.hash}`}>{resource.source}: {resource.title} <small>{resource.hash}</small></li>)}</ul>{brief.botInputs.length > 0 && <div className="briefBotInputs"><strong>Bot recommendations</strong>{brief.botInputs.map((input) => <article key={`${brief.id}-${input.bot}`}><p><strong>{input.bot}</strong> <small>{input.template}</small></p><ul>{input.recommendations.map((recommendation) => <li key={recommendation}>{recommendation}</li>)}</ul></article>)}</div>}</details>) : <p className="muted">The first exchange-day briefing will appear after the 08:30 ET worker run.</p>}{briefHasMore && <div className="paginationControls"><button type="button" className="secondaryButton" onClick={() => void loadMore("briefs")} disabled={loadingMore !== null}>{loadingMore === "briefs" ? "Loading…" : "Load older briefings"}</button></div>}</section>
     {modal && <div className="modalOverlay" role="presentation" onMouseDown={closeModal}><section className="modalCard resourceModal" role="dialog" aria-modal="true" aria-labelledby="resource-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="modalHeading"><div><p className="eyebrow">{modal.mode === "new" ? "NEW RESOURCE" : "EDIT RESOURCE"}</p><h2 id="resource-modal-title">{modal.mode === "new" ? "Review a public link" : modal.source.name}</h2></div><button type="button" className="iconButton" onClick={closeModal} aria-label="Close">×</button></div><form className="resourceModalForm" onSubmit={saveResource}><p className="muted">Only public HTTPS pages are accepted. Changing a URL performs a new trust review and clears previous refresh state.</p><label>Public URL<input type="url" required placeholder="https://example.com/article" value={draft.url} onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></label><label>Category<select value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value as ResourceCategory }))}>{resourceCategories.map((item) => <option key={item} value={item}>{item.replace("_", " ")}</option>)}</select></label><div className="modalFormActions"><button type="button" className="secondaryButton" onClick={closeModal}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving…" : modal.mode === "new" ? "Review link" : "Save changes"}</button></div></form></section></div>}
   </section>;
 }

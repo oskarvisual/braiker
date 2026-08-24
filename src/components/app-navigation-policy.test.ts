@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountMenuItems, sidebarNavigationItems } from "./app-navigation-policy";
+import { accountMenuItems, mobileNavigationItems, sidebarNavigationItems } from "./app-navigation-policy";
 
 describe("application navigation policy", () => {
   it("keeps the admin-only Bot Manager in the sidebar and moves account administration to the account menu", () => {
@@ -23,5 +23,13 @@ describe("application navigation policy", () => {
       { href: "/activity", label: "History" }
     ]);
     expect(accountMenuItems("VIEWER")).toEqual([]);
+  });
+
+  it("combines operational and account destinations in the one mobile menu", () => {
+    expect(mobileNavigationItems("ADMIN")).toEqual([
+      ...sidebarNavigationItems("ADMIN"),
+      ...accountMenuItems("ADMIN"),
+      { href: "/account/password", label: "Change password" }
+    ]);
   });
 });

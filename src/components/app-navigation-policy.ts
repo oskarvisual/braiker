@@ -16,3 +16,7 @@ export function accountMenuItems(role: AppRole): NavigationItem[] {
     ? [{ href: "/status", label: "System status" }, { href: "/settings", label: "Settings" }, { href: "/admin/users", label: "Users" }]
     : [];
 }
+
+export function mobileNavigationItems(role: AppRole): NavigationItem[] {
+  return [...sidebarNavigationItems(role), ...accountMenuItems(role), { href: "/account/password", label: "Change password" }];
+}
