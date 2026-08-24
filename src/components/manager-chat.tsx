@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
 import { useToast } from "@/components/toast";
+import { AssistantMarkdown } from "@/components/assistant-markdown";
 
 export type ManagerMessage = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; source: "WEB" | "TELEGRAM" | "TELEGRAM_ALERT" | "SYSTEM"; content: string; createdAt: string };
 export type ManagerSession = { id: string; title: string; kind: "OPERATIONS" | "CONVERSATION"; pinned: boolean; updatedAt: string; messages: ManagerMessage[] };
@@ -50,6 +51,8 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
   const [learningProposals, setLearningProposals] = useState(initialLearningProposals);
   const [historyPages, setHistoryPages] = useState<Record<string, { hasMore: boolean; nextCursor: string | null }>>({});
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null, [sessions, selectedId]);
   const composerRef = useAutoResizingComposer(draft);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -138,6 +141,39 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     }
   }
 
+  async function updateConversation(session: ManagerSession, action: "RENAME" | "ARCHIVE") {
+    const response = await fetch(`/api/manager/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(action === "RENAME" ? { action, title: renameTitle } : { action })
+    });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? "MANAGER_SESSION_UPDATE_FAILED");
+    await refreshSessions();
+  }
+
+  async function saveRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || !renameTitle.trim()) return;
+    try {
+      await updateConversation(selected, "RENAME");
+      setRenamingSessionId(null);
+      pushToast({ tone: "success", title: "Conversation renamed", message: "Its transcript was not changed." });
+    } catch {
+      pushToast({ tone: "error", title: "Conversation could not be renamed", message: "Please use a short title and try again." });
+    }
+  }
+
+  async function archiveConversation(session: ManagerSession) {
+    try {
+      await updateConversation(session, "ARCHIVE");
+      if (renamingSessionId === session.id) setRenamingSessionId(null);
+      pushToast({ tone: "success", title: "Conversation archived", message: "It is hidden from this list; its transcript was retained." });
+    } catch {
+      pushToast({ tone: "error", title: "Conversation could not be archived", message: "No transcript was removed." });
+    }
+  }
+
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
@@ -202,17 +238,20 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       <aside className="managerChatSidebar" aria-label="Bot Manager conversations">
         <div className="managerChatSidebarTitle"><strong>Conversations</strong></div>
         <div className="managerSessionList">
-          {sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => { stickToLatestRef.current = true; setSelectedId(session.id); }}>
-            <strong>{session.pinned ? "📌 " : ""}{session.title}</strong><small>{session.kind === "OPERATIONS" ? "Telegram alerts and operations" : "Manual conversation"}</small>
-          </button>)}
+          {sessions.map((session) => <div className="managerSessionRow" key={session.id}>
+            <button type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => { stickToLatestRef.current = true; setSelectedId(session.id); }}>
+              <strong>{session.pinned ? "📌 " : ""}{session.title}</strong><small>{session.kind === "OPERATIONS" ? "Telegram alerts and operations" : "Manual conversation"}</small>
+            </button>
+            {!session.pinned && <div className="managerSessionActions"><button type="button" aria-label={`Rename ${session.title}`} onClick={() => { setSelectedId(session.id); setRenameTitle(session.title); setRenamingSessionId(session.id); }}>Rename</button><button type="button" aria-label={`Archive ${session.title}`} onClick={() => void archiveConversation(session)}>Archive</button></div>}
+          </div>)}
         </div>
       </aside>
       <section className="managerConversation" aria-live="polite">
         {selected ? <>
-          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p><h2>{selected.title}</h2></div><span>Confirmation required</span></div>
+          <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p>{renamingSessionId === selected.id ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} autoFocus /><button type="submit">Save</button><button type="button" className="secondaryButton" onClick={() => setRenamingSessionId(null)}>Cancel</button></form> : <h2>{selected.title}</h2>}</div><span>Confirmation required</span></div>
           <div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlderMessages(); }}>
             {loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}
-            {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small><p>{message.content}</p></article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
+            {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small>{message.role === "ASSISTANT" ? <div className="managerMessageContent"><AssistantMarkdown content={message.content} /></div> : <p>{message.content}</p>}</article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
           </div>
           {actionProposals.map((actionProposal) => <aside className="managerActionProposal" aria-live="polite" key={actionProposal.id}><p className="eyebrow">PENDING POWER CHANGE</p><strong>{actionProposal.action === "TURN_ON" ? "Turn ON" : "Turn OFF"} · {actionProposal.botName}</strong><p>{managerActionSummary(actionProposal)}</p><div><small>Expires {new Date(actionProposal.expiresAt).toLocaleTimeString()}</small><button type="button" onClick={() => void confirmAction(actionProposal)}>Confirm change</button></div></aside>)}
           {learningProposals.map((proposal) => <aside className="managerActionProposal" aria-live="polite" key={proposal.id}><p className="eyebrow">PENDING LEARNING PROPOSAL</p><strong>{proposal.botName}</strong><p>{proposal.rule}</p><small>Evidence was detected by the bot. This can only add cautious AI-review context; it cannot alter signals, capital, risk, size, or execution.</small><div><small>Expires {new Date(proposal.expiresAt).toLocaleString()}</small><button type="button" onClick={() => void resolveLearningProposal(proposal, "APPROVE")}>Approve rule</button><button type="button" className="secondaryButton" onClick={() => void resolveLearningProposal(proposal, "REJECT")}>Reject</button></div></aside>)}

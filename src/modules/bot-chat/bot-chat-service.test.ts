@@ -1,11 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBotChatSession, sendBotChatMessage } from "./bot-chat-service";
+import { archiveBotChatSession, createBotChatSession, renameBotChatSession, sendBotChatMessage } from "./bot-chat-service";
 
 describe("isolated bot chats", () => {
   it("creates separate, user-owned sessions for the same bot", async () => {
     const create = vi.fn().mockResolvedValue({ id: "chat-1" });
     await createBotChatSession({ userId: "user-1", botId: "bot-1", title: "QQQ review" }, { botChatSession: { create }, botInstance: { findUnique: vi.fn().mockResolvedValue({ id: "bot-1", runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false }) } } as never);
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: "user-1", botId: "bot-1", title: "QQQ review", kind: "CONVERSATION" }) });
+  });
+
+  it("renames and archives only the selected user's bot session", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "chat-1" });
+    const update = vi.fn().mockResolvedValue({ id: "chat-1", title: "AAPL analysis" });
+    const db = { botChatSession: { findFirst, update } } as never;
+
+    await expect(renameBotChatSession({ userId: "user-1", botId: "bot-1", sessionId: "chat-1", title: " AAPL analysis " }, db)).resolves.toMatchObject({ title: "AAPL analysis" });
+    await expect(archiveBotChatSession({ userId: "user-1", botId: "bot-1", sessionId: "chat-1" }, db)).resolves.toMatchObject({ id: "chat-1" });
+    expect(findFirst).toHaveBeenCalledWith({ where: { id: "chat-1", userId: "user-1", botId: "bot-1", archivedAt: null }, select: { id: true } });
   });
 
   it("rejects a message when the bot is not actively running", async () => {
@@ -42,6 +52,24 @@ describe("isolated bot chats", () => {
     expect(db.botChatMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ role: "USER" }) }));
     expect(db.botChatMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { not: "message-1" } }), take: 11 }));
     expect(db.botDailyContext.create).toHaveBeenCalledWith({ data: expect.objectContaining({ botId: "bot-1", userId: "user-1", messageId: "message-1", source: "USER_CHAT" }) });
+  });
+
+  it("answers a bot-capital question deterministically while AI is disabled", async () => {
+    const responder = { reply: vi.fn() };
+    const db = {
+      botChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "chat-1", title: "New conversation" }), updateMany: vi.fn() },
+      botChatMessage: { create: vi.fn().mockResolvedValue({ id: "message-1" }) },
+      botInstance: { findUnique: vi.fn()
+        .mockResolvedValueOnce({ id: "bot-1", runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", status: "RUNNING", killSwitch: false })
+        .mockResolvedValueOnce({ id: "bot-1", name: "Juan", riskPolicy: { maxTradesPerDay: 2 }, adaptiveRiskEnabled: false, initialCapital: { toString: () => "10" }, currentCapital: { toString: () => "7" }, reservedCapital: { toString: () => "1" }, botPositions: [] }) },
+      tradeProposal: { count: vi.fn().mockResolvedValue(1) }
+    };
+
+    const result = await sendBotChatMessage({ userId: "user-1", botId: "bot-1", sessionId: "chat-1", content: "¿Cuánto dinero queda?" }, { db: db as never, responder, aiEnabled: false });
+
+    expect(responder.reply).not.toHaveBeenCalled();
+    expect(result.reply).toContain("Capital disponible para nuevas compras: $6.00");
+    expect(db.botChatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { title: "¿Cuánto dinero queda?" } }));
   });
 
   it("passes the exact selected operation to the responder instead of relying on recent history", async () => {

@@ -5,6 +5,7 @@ import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 import { isBotChatAvailable } from "@/modules/bot-chat/availability";
 import { parseBotLearningCommand, recordLearnedInstruction } from "@/modules/bots/learned-instruction-service";
 import type { UserRole } from "@prisma/client";
+import { buildBotInformationReply, parseBotInformationRequest, readBotInformation } from "@/modules/bot-chat/bot-information";
 
 type BotChatDb = Pick<PrismaClient, "botChatSession" | "botChatMessage" | "botDailyContext" | "botInstance" | "order" | "tradeProposal" | "botScanRun" | "botLearnedInstruction" | "auditLog">;
 
@@ -18,6 +19,20 @@ function sessionTitle(value: string) {
 export async function createBotChatSession(input: { userId: string; botId: string; title?: string }, db: Pick<PrismaClient, "botChatSession" | "botInstance">) {
   await assertBotCanChat(input.botId, db);
   return db.botChatSession.create({ data: { userId: input.userId, botId: input.botId, kind: "CONVERSATION", title: sessionTitle(input.title ?? "") } });
+}
+
+export async function renameBotChatSession(input: { userId: string; botId: string; sessionId: string; title: string }, db: Pick<PrismaClient, "botChatSession">) {
+  const title = sessionTitle(input.title);
+  if (title === "New conversation" && !sanitizeManagerMessage(input.title)) throw new Error("BOT_CHAT_TITLE_REQUIRED");
+  const session = await db.botChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, botId: input.botId, archivedAt: null }, select: { id: true } });
+  if (!session) throw new Error("BOT_CHAT_SESSION_NOT_FOUND");
+  return db.botChatSession.update({ where: { id: session.id }, data: { title } });
+}
+
+export async function archiveBotChatSession(input: { userId: string; botId: string; sessionId: string }, db: Pick<PrismaClient, "botChatSession">) {
+  const session = await db.botChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, botId: input.botId, archivedAt: null }, select: { id: true } });
+  if (!session) throw new Error("BOT_CHAT_SESSION_NOT_FOUND");
+  return db.botChatSession.update({ where: { id: session.id }, data: { archivedAt: new Date() } });
 }
 
 async function assertBotCanChat(botId: string, db: Pick<PrismaClient, "botInstance">) {
@@ -93,9 +108,22 @@ export async function sendBotChatMessage(input: { userId: string; botId: string;
   const content = sanitizeManagerMessage(input.content);
   if (!content) throw new Error("BOT_CHAT_MESSAGE_EMPTY");
   const bot = await assertBotCanChat(input.botId, dependencies.db);
-  const session = await dependencies.db.botChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, botId: input.botId }, select: { id: true } });
+  const session = await dependencies.db.botChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, botId: input.botId, archivedAt: null }, select: { id: true, title: true } });
   if (!session) throw new Error("BOT_CHAT_SESSION_NOT_FOUND");
   const message = await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "USER", content } });
+  if (session.title === "New conversation") {
+    const title = sanitizeManagerMessage(content).replace(/\s+/g, " ").slice(0, 120);
+    if (title) await dependencies.db.botChatSession.updateMany({ where: { id: session.id, title: "New conversation" }, data: { title } });
+  }
+  const informationRequest = parseBotInformationRequest(content);
+  if (informationRequest) {
+    const information = await readBotInformation(input.botId, dependencies.db);
+    if (information) {
+      const reply = buildBotInformationReply({ ...information, locale: /[¿áéíóúñ]|\b(?:cuantas|cuantos|operaciones|dinero|capital|estado|resumen)\b/i.test(content) ? "es" : "en" });
+      await dependencies.db.botChatMessage.create({ data: { sessionId: session.id, role: "ASSISTANT", content: reply } });
+      return { reply, available: true, addedToDailyContext: false };
+    }
+  }
   const learnedContent = parseBotLearningCommand(content);
   if (learnedContent) {
     const reply = input.actorRole === "ADMIN"

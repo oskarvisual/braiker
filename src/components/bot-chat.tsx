@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
+import { AssistantMarkdown } from "@/components/assistant-markdown";
 
 type Message = { id: string; role: "USER" | "ASSISTANT" | "SYSTEM"; content: string; createdAt: string };
 type Session = { id: string; title: string; kind: "CONVERSATION" | "MANAGER_NOTE"; createdAt: string; updatedAt: string };
@@ -16,6 +17,8 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
   const handledContextRequest = useRef<string | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const stickToLatestRef = useRef(true);
@@ -92,6 +95,33 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
     } finally { setSending(false); }
   }
 
+  async function updateSession(session: Session, action: "RENAME" | "ARCHIVE") {
+    const response = await fetch(`/api/bots/${botId}/chat/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(action === "RENAME" ? { action, title: renameTitle } : { action })
+    });
+    if (!response.ok) throw new Error("BOT_CHAT_SESSION_UPDATE_FAILED");
+    await load(action === "ARCHIVE" ? null : session.id);
+  }
+
+  async function saveRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selected = data?.sessions.find((session) => session.id === selectedSessionId);
+    if (!selected || !renameTitle.trim()) return;
+    try {
+      await updateSession(selected, "RENAME");
+      setRenamingSessionId(null);
+    } catch { /* The existing transcript remains visible after a failed rename. */ }
+  }
+
+  async function archiveSession(session: Session) {
+    try {
+      await updateSession(session, "ARCHIVE");
+      if (renamingSessionId === session.id) setRenamingSessionId(null);
+    } catch { /* Archival is intentionally non-destructive. */ }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
@@ -100,6 +130,12 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
     setDraft(""); setSending(true); stickToLatestRef.current = true;
     const optimistic: Message = { id: `local-${Date.now()}`, role: "USER", content, createdAt: new Date().toISOString() };
     setData((current) => current ? { ...current, messages: [...current.messages, optimistic] } : current);
+    setData((current) => current ? {
+      ...current,
+      sessions: current.sessions.map((session) => session.id === selectedSessionId && session.title === "New conversation"
+        ? { ...session, title: content.replace(/\s+/g, " ").slice(0, 120) }
+        : session)
+    } : current);
     try {
       const response = await fetch(`/api/bots/${botId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: selectedSessionId, content }) });
       const payload = await response.json() as { reply?: string; addedToDailyContext?: boolean };
@@ -116,8 +152,8 @@ export function BotChat({ botId, botName, active: initialActive, compact = false
   return <section className={`botChat ${compact ? "botChatCompact" : ""}`}>
     {!compact && <header className="managerChatHeading"><div><p className="eyebrow">LOCAL BOT CHAT</p><h1>{botName}</h1><p className="intro">Ask about this bot’s analysis. Start a message with <strong>Important:</strong> only to add cautious context for today; it can never issue an order or relax a control.</p></div></header>}
     <div className={`managerChatLayout botChatLayout ${data?.messages.length ? "" : "emptyConversation"}`}>
-      <aside className="managerChatSidebar"><div className="managerChatSidebarTitle"><span>Sessions</span><button type="button" className="inlineAction" onClick={() => void createSession()} disabled={sending}>New</button></div><small>Context and notes for this bot.</small><div className="managerSessionList">{data?.sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selectedSessionId === session.id ? "selected" : ""}`} onClick={() => void load(session.id)}><strong>{session.title}</strong><small>{session.kind === "MANAGER_NOTE" ? "Bot Manager note" : "Private conversation"}</small></button>)}</div></aside>
-      <div className="managerConversation"><header className="managerConversationHeader"><div><p className="eyebrow">{data?.sessions.find((session) => session.id === selectedSessionId)?.kind === "MANAGER_NOTE" ? "MANAGER NOTE" : "CONTEXTUAL SESSION"}</p><h2>{data?.sessions.find((session) => session.id === selectedSessionId)?.title ?? "Choose or create a session"}</h2></div><span>Paper-only</span></header><div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlder(); }}>{loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}{data?.messages.length ? data.messages.map((message) => <article key={message.id} className={`managerMessage ${message.role.toLowerCase()}`}><small>{message.role === "USER" ? "You" : message.role === "SYSTEM" ? "Bot Manager" : botName}</small><p>{message.content}</p></article>) : <div className="managerEmpty"><strong>No messages yet.</strong><p>Create a local session to ask why {botName} analyzed, rejected, or traded an opportunity.</p></div>}</div><form className="managerComposer" onSubmit={submit}><label htmlFor={`bot-chat-message-${botId}`}>Message {botName}</label><div><textarea ref={composerRef} id={`bot-chat-message-${botId}`} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} disabled={sending || !selectedSessionId} placeholder="Why did you skip this opportunity?" /><button type="submit" disabled={sending || !draft.trim() || !selectedSessionId}>{sending ? "Thinking…" : "Send"}</button></div><small>Use “Important: …” for a cautious, day-only note. It may defer a candidate, never create one.</small></form></div>
+      <aside className="managerChatSidebar"><div className="managerChatSidebarTitle"><span>Sessions</span><button type="button" className="inlineAction" onClick={() => void createSession()} disabled={sending}>New</button></div><small>Context and notes for this bot.</small><div className="managerSessionList">{data?.sessions.map((session) => <div className="managerSessionRow" key={session.id}><button type="button" className={`managerSession ${selectedSessionId === session.id ? "selected" : ""}`} onClick={() => void load(session.id)}><strong>{session.title}</strong><small>{session.kind === "MANAGER_NOTE" ? "Bot Manager note" : "Private conversation"}</small></button><div className="managerSessionActions"><button type="button" aria-label={`Rename ${session.title}`} onClick={() => { setSelectedSessionId(session.id); setRenameTitle(session.title); setRenamingSessionId(session.id); }}>Rename</button><button type="button" aria-label={`Archive ${session.title}`} onClick={() => void archiveSession(session)}>Archive</button></div></div>)}</div></aside>
+      <div className="managerConversation"><header className="managerConversationHeader"><div><p className="eyebrow">{data?.sessions.find((session) => session.id === selectedSessionId)?.kind === "MANAGER_NOTE" ? "MANAGER NOTE" : "CONTEXTUAL SESSION"}</p>{renamingSessionId === selectedSessionId ? <form className="chatTitleEditor" onSubmit={saveRename}><input aria-label="Conversation title" value={renameTitle} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} autoFocus /><button type="submit">Save</button><button type="button" className="secondaryButton" onClick={() => setRenamingSessionId(null)}>Cancel</button></form> : <h2>{data?.sessions.find((session) => session.id === selectedSessionId)?.title ?? "Choose or create a session"}</h2>}</div><span>Paper-only</span></header><div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlder(); }}>{loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}{data?.messages.length ? data.messages.map((message) => <article key={message.id} className={`managerMessage ${message.role.toLowerCase()}`}><small>{message.role === "USER" ? "You" : message.role === "SYSTEM" ? "Bot Manager" : botName}</small>{message.role === "ASSISTANT" ? <div className="managerMessageContent"><AssistantMarkdown content={message.content} /></div> : <p>{message.content}</p>}</article>) : <div className="managerEmpty"><strong>No messages yet.</strong><p>Create a local session to ask why {botName} analyzed, rejected, or traded an opportunity.</p></div>}</div><form className="managerComposer" onSubmit={submit}><label htmlFor={`bot-chat-message-${botId}`}>Message {botName}</label><div><textarea ref={composerRef} id={`bot-chat-message-${botId}`} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} disabled={sending || !selectedSessionId} placeholder="Why did you skip this opportunity?" /><button type="submit" disabled={sending || !draft.trim() || !selectedSessionId}>{sending ? "Thinking…" : "Send"}</button></div><small>Use “Important: …” for a cautious, day-only note. It may defer a candidate, never create one.</small></form></div>
     </div>
   </section>;
 }

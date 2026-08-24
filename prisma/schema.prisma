@@ -925,11 +925,13 @@ model ManagerChatSession {
   title       String                  @db.VarChar(120)
   pinned      Boolean                 @default(false)
   externalKey String?                 @unique @db.VarChar(191)
+  archivedAt  DateTime?               @db.DateTime(3)
   createdAt   DateTime                @default(now()) @db.DateTime(3)
   updatedAt   DateTime                @updatedAt @db.DateTime(3)
   user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    ManagerChatMessage[]
   @@index([userId, pinned, updatedAt])
+  @@index([userId, archivedAt, pinned, updatedAt])
 }
 
 /// Message transcript for the global Bot Manager. `sourceReference` makes
@@ -977,6 +979,7 @@ model BotChatSession {
   botId     String             @db.Char(36)
   kind      BotChatSessionKind @default(CONVERSATION)
   title     String             @default("New conversation") @db.VarChar(120)
+  archivedAt DateTime?         @db.DateTime(3)
   createdAt DateTime           @default(now()) @db.DateTime(3)
   updatedAt DateTime           @updatedAt @db.DateTime(3)
   user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -984,6 +987,8 @@ model BotChatSession {
   messages  BotChatMessage[]
   @@index([userId, updatedAt])
   @@index([botId, userId, updatedAt])
+  @@index([userId, archivedAt, updatedAt])
+  @@index([botId, userId, archivedAt, updatedAt])
 }
 
 model BotChatMessage {

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { appendManagerAlert, ensureOperationsSession, listManagerConversations } from "./manager-chat-service";
+import { appendManagerAlert, archiveManagerConversation, createManagerConversation, ensureOperationsSession, listManagerConversations } from "./manager-chat-service";
 
 const databaseUrl = process.env.BRAIKER_TEST_DATABASE_URL;
 const describeMysql = databaseUrl ? describe : describe.skip;
@@ -39,5 +39,17 @@ describeMysql("Bot Manager transcript persistence (MySQL)", () => {
     expect(ownerSessions[0]?.messages).toHaveLength(1);
     expect(otherSessions).toHaveLength(1);
     expect(otherSessions[0]?.messages).toHaveLength(0);
+  });
+
+  it("retains an archived ordinary transcript while excluding it from active conversations", async () => {
+    if (!db) throw new Error("BRAIKER_TEST_DATABASE_URL is required");
+    const owner = await db.user.create({ data: { email: `manager-chat-test-${crypto.randomUUID()}@example.test`, passwordHash: "not-a-real-password", role: "ADMIN", mustChangePassword: false } });
+    const conversation = await createManagerConversation(owner.id, "Capital review", db);
+    await db.managerChatMessage.create({ data: { sessionId: conversation.id, role: "USER", source: "WEB", content: "How much money is left?" } });
+
+    await archiveManagerConversation({ userId: owner.id, sessionId: conversation.id }, db);
+
+    await expect(db.managerChatSession.findUniqueOrThrow({ where: { id: conversation.id }, include: { messages: true } })).resolves.toMatchObject({ archivedAt: expect.any(Date), messages: [{ content: "How much money is left?" }] });
+    await expect(listManagerConversations(owner.id, db)).resolves.toHaveLength(1);
   });
 });
