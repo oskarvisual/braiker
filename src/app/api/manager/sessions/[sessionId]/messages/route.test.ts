@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
   sendManagerMessage: vi.fn(),
   mirrorWebManagerExchangeToTelegram: vi.fn(),
   assertSameOrigin: vi.fn(),
-  env: vi.fn()
+  env: vi.fn(),
+  findSession: vi.fn(),
+  findMessages: vi.fn()
 }));
 
 vi.mock("@/modules/auth/session", () => ({ requireUser: mocks.requireUser }));
@@ -13,7 +15,7 @@ vi.mock("@/modules/manager-chat/manager-chat-service", () => ({ sendManagerMessa
 vi.mock("@/modules/telegram/bot-manager", () => ({ mirrorWebManagerExchangeToTelegram: mocks.mirrorWebManagerExchangeToTelegram }));
 vi.mock("@/lib/http", () => ({ assertSameOrigin: mocks.assertSameOrigin }));
 vi.mock("@/lib/env", () => ({ env: mocks.env }));
-vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+vi.mock("@/lib/prisma", () => ({ prisma: { managerChatSession: { findFirst: mocks.findSession }, managerChatMessage: { findMany: mocks.findMessages } } }));
 vi.mock("@/modules/manager-chat/openai-manager-chat", () => ({ OpenAiManagerChat: class {} }));
 vi.mock("@/modules/manager-chat/manager-chat", () => ({ resolveManagerChatModel: () => "test-model" }));
 
@@ -42,5 +44,16 @@ describe("POST /api/manager/sessions/[sessionId]/messages", () => {
       actionProposal: { id: "proposal-1", botName: "Juan trAIder", action: "TURN_ON", expiresAt: "2026-08-22T15:10:00.000Z" },
       telegramMirrored: false
     });
+  });
+
+  it("returns a bounded older-message page only for the Admin's own session", async () => {
+    mocks.findSession.mockResolvedValue({ id: "session-1" });
+    mocks.findMessages.mockResolvedValue([{ id: "new", role: "ASSISTANT", source: "SYSTEM", content: "Latest", createdAt: new Date("2026-08-22T15:01:00.000Z") }, { id: "old", role: "USER", source: "WEB", content: "Earlier", createdAt: new Date("2026-08-22T15:00:00.000Z") }]);
+    const route = (await import("./route")) as { GET: (request: Request, context: { params: Promise<{ sessionId: string }> }) => Promise<Response> };
+
+    const response = await route.GET(new Request("http://localhost/api/manager/sessions/session-1/messages"), { params: Promise.resolve({ sessionId: "session-1" }) });
+
+    expect(mocks.findMessages).toHaveBeenCalledWith({ where: { sessionId: "session-1" }, orderBy: { createdAt: "desc" }, take: 51 });
+    await expect(response.json()).resolves.toMatchObject({ messages: [{ id: "old" }, { id: "new" }], hasMore: false, nextCursor: null });
   });
 });

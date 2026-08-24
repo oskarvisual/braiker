@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAutoResizingComposer } from "@/components/auto-resizing-composer";
 import { useToast } from "@/components/toast";
 
@@ -28,6 +28,12 @@ export function managerActionSummary(proposal: ManagerActionProposal) {
   return `This will ${operation} ${proposal.botName} in Paper mode. BrAIker will revalidate permissions, lifecycle state, risk status, and the Kill Switch when you confirm.`;
 }
 
+function retainOlderMessages(previous: ManagerMessage[], fresh: ManagerMessage[]) {
+  const earliestFresh = fresh[0]?.createdAt;
+  if (!earliestFresh) return fresh;
+  return [...previous.filter((message) => message.createdAt < earliestFresh), ...fresh];
+}
+
 export function ManagerChat({ initialSessions, initialActionProposals = [], initialLearningProposals = [] }: { initialSessions: ManagerSession[]; initialActionProposals?: ManagerActionProposal[]; initialLearningProposals?: LearningProposal[] }) {
   const { pushToast } = useToast();
   const [sessions, setSessions] = useState(initialSessions);
@@ -37,8 +43,13 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
   const [sending, setSending] = useState(false);
   const [actionProposals, setActionProposals] = useState(initialActionProposals);
   const [learningProposals, setLearningProposals] = useState(initialLearningProposals);
+  const [historyPages, setHistoryPages] = useState<Record<string, { hasMore: boolean; nextCursor: string | null }>>({});
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null, [sessions, selectedId]);
   const composerRef = useAutoResizingComposer(draft);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const stickToLatestRef = useRef(true);
+  const restoreScrollHeightRef = useRef<number | null>(null);
 
   const refreshSessions = useCallback(async () => {
     const response = await fetch("/api/manager/sessions", {
@@ -48,11 +59,33 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     const payload = await response.json() as { sessions?: ManagerSession[]; actionProposals?: ManagerActionProposal[]; learningProposals?: LearningProposal[]; error?: string };
     if (!response.ok || !payload.sessions) throw new Error(payload.error ?? "MANAGER_SESSION_LIST_FAILED");
 
-    setSessions(payload.sessions);
+    setSessions((current) => payload.sessions!.map((next) => {
+      const previous = current.find((session) => session.id === next.id);
+      return previous ? { ...next, messages: retainOlderMessages(previous.messages, next.messages) } : next;
+    }));
     setSelectedId((current) => synchronizeManagerSessions(current, payload.sessions ?? []).selectedId);
     setActionProposals(payload.actionProposals ?? []);
     setLearningProposals(payload.learningProposals ?? []);
   }, []);
+
+  async function loadOlderMessages() {
+    if (!selected || loadingOlder || historyPages[selected.id]?.hasMore === false) return;
+    const cursor = historyPages[selected.id]?.nextCursor ?? selected.messages[0]?.id;
+    if (!cursor || !messagesRef.current) return;
+    const beforeHeight = messagesRef.current.scrollHeight;
+    setLoadingOlder(true);
+    try {
+      const response = await fetch(`/api/manager/sessions/${selected.id}/messages?before=${encodeURIComponent(cursor)}`, { cache: "no-store" });
+      const payload = await response.json() as { messages?: ManagerMessage[]; hasMore?: boolean; nextCursor?: string | null };
+      if (!response.ok || !payload.messages) return;
+      restoreScrollHeightRef.current = beforeHeight;
+      stickToLatestRef.current = false;
+      setSessions((current) => current.map((session) => session.id === selected.id ? { ...session, messages: [...payload.messages!, ...session.messages] } : session));
+      setHistoryPages((current) => ({ ...current, [selected.id]: { hasMore: payload.hasMore ?? false, nextCursor: payload.nextCursor ?? null } }));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -72,6 +105,17 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     };
   }, [refreshSessions, sending]);
 
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    if (restoreScrollHeightRef.current !== null) {
+      container.scrollTop += container.scrollHeight - restoreScrollHeightRef.current;
+      restoreScrollHeightRef.current = null;
+      return;
+    }
+    if (stickToLatestRef.current) container.scrollTop = container.scrollHeight;
+  }, [selectedId, selected?.messages.length]);
+
   async function createConversation() {
     setCreating(true);
     try {
@@ -79,6 +123,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       const payload = await response.json() as { session?: ManagerSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(payload.error ?? "MANAGER_SESSION_CREATE_FAILED");
       setSessions((current) => [...current, payload.session!]);
+      stickToLatestRef.current = true;
       setSelectedId(payload.session.id);
     } catch {
       pushToast({ tone: "error", title: "Conversation could not be created", message: "Please try again." });
@@ -94,6 +139,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
     const localMessage: ManagerMessage = { id: `local-${Date.now()}`, role: "USER", source: "WEB", content, createdAt: new Date().toISOString() };
     setDraft("");
     setSending(true);
+    stickToLatestRef.current = true;
     setSessions((current) => current.map((session) => session.id === selected.id ? { ...session, messages: [...session.messages, localMessage], updatedAt: localMessage.createdAt } : session));
     try {
       const response = await fetch(`/api/manager/sessions/${selected.id}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
@@ -148,7 +194,7 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       <aside className="managerChatSidebar" aria-label="Bot Manager conversations">
         <div className="managerChatSidebarTitle"><strong>Conversations</strong></div>
         <div className="managerSessionList">
-          {sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => setSelectedId(session.id)}>
+          {sessions.map((session) => <button key={session.id} type="button" className={`managerSession ${selected?.id === session.id ? "selected" : ""}`} onClick={() => { stickToLatestRef.current = true; setSelectedId(session.id); }}>
             <strong>{session.pinned ? "📌 " : ""}{session.title}</strong><small>{session.kind === "OPERATIONS" ? "Telegram alerts and operations" : "Manual conversation"}</small>
           </button>)}
         </div>
@@ -156,7 +202,8 @@ export function ManagerChat({ initialSessions, initialActionProposals = [], init
       <section className="managerConversation" aria-live="polite">
         {selected ? <>
           <div className="managerConversationHeader"><div><p className="eyebrow">{selected.pinned ? "PINNED OPERATIONS SESSION" : "BOT MANAGER CHAT"}</p><h2>{selected.title}</h2></div><span>Confirmation required</span></div>
-          <div className="managerMessages">
+          <div className="managerMessages" ref={messagesRef} onScroll={(event) => { const container = event.currentTarget; stickToLatestRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48; if (container.scrollTop < 32) void loadOlderMessages(); }}>
+            {loadingOlder && <p className="chatHistoryLoading">Loading earlier messages…</p>}
             {selected.messages.length ? selected.messages.map((message) => <article className={`managerMessage ${message.role.toLowerCase()}`} key={message.id}><small>{labelForSource(message.source)}</small><p>{message.content}</p></article>) : <div className="managerEmpty"><strong>Start an operational conversation.</strong><p>Ask BrAIker to explain the latest activity, risk decisions, or prepare an explicit ON/OFF proposal.</p></div>}
           </div>
           {actionProposals.map((actionProposal) => <aside className="managerActionProposal" aria-live="polite" key={actionProposal.id}><p className="eyebrow">PENDING POWER CHANGE</p><strong>{actionProposal.action === "TURN_ON" ? "Turn ON" : "Turn OFF"} · {actionProposal.botName}</strong><p>{managerActionSummary(actionProposal)}</p><div><small>Expires {new Date(actionProposal.expiresAt).toLocaleTimeString()}</small><button type="button" onClick={() => void confirmAction(actionProposal)}>Confirm change</button></div></aside>)}

@@ -13,4 +13,12 @@ describe("shared chat layout", () => {
     expect(styles).toContain(".managerComposer textarea { min-height:48px;");
     expect(styles).toContain("max-height:168px;");
   });
+
+  it("keeps conversation history in its own bounded, contained scroll area", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(styles).toContain(".managerChatLayout { display:grid; grid-template-columns:270px minmax(0,1fr); height:min(72vh,760px);");
+    expect(styles).toContain(".managerMessages { display:grid; align-content:start; gap:14px; flex:1; min-height:0;");
+    expect(styles).toContain("overflow-y:auto; overscroll-behavior:contain;");
+  });
 });

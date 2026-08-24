@@ -28,12 +28,12 @@ describe("GET /api/bots/[botId]/chat", () => {
     ]);
   });
 
-  it("loads the one hundred newest messages and returns them in chronological order", async () => {
+  it("loads one bounded newest page in chronological order and exposes an older-message cursor", async () => {
     const route = await import("./route");
 
     const response = await route.GET(new Request("http://localhost/api/bots/bot-1/chat"), { params: Promise.resolve({ botId: "bot-1" }) });
 
-    expect(mocks.findMessages).toHaveBeenCalledWith({ where: { sessionId: "session-1" }, orderBy: { createdAt: "desc" }, take: 100 });
-    await expect(response.json()).resolves.toMatchObject({ messages: [{ id: "old" }, { id: "new" }] });
+    expect(mocks.findMessages).toHaveBeenCalledWith({ where: { sessionId: "session-1" }, orderBy: { createdAt: "desc" }, take: 51 });
+    await expect(response.json()).resolves.toMatchObject({ messages: [{ id: "old" }, { id: "new" }], hasMore: false, nextCursor: null });
   });
 });

@@ -21,12 +21,20 @@ describe("Bot Manager reports", () => {
       generatedAt: new Date("2026-08-21T21:35:00.000Z"),
       bots: { on: 2, off: 1, dead: 0 },
       orders: { total: 3, filled: 2, rejected: 1, inProgress: 0 },
+      scans: { completed: 4, skipped: 1, errors: 0, botsWithoutScan: ["Laura"] },
+      briefings: [{ marketDate: "2026-08-21", botInputs: 3, resources: [{ category: "MACRO", title: "CPI release" }, { category: "NEWS", title: "Market briefing" }] }],
+      macro: { created: [{ title: "US CPI", startsAt: "2026-08-22T12:30:00.000Z" }], upcoming: [{ title: "Fed decision", startsAt: "2026-08-22T18:00:00.000Z" }] },
+      botActivity: [{ name: "Bob", status: "COMPLETED", reason: "ANALYZED" }]
     });
 
     expect(report.eventType).toBe("BOT_MANAGER_DAILY_REPORT");
     expect(report.dedupeKey).toBe("bot-manager-report:daily:2026-08-21");
-    expect(report.message).toContain("Paper-only: 2 on, 1 off, 0 dead.");
+    expect(report.message).toContain("Paper-only fleet: 2 on, 1 off, 0 dead.");
     expect(report.message).toContain("Orders: 3 total, 2 filled, 1 rejected, 0 in progress.");
+    expect(report.message).toContain("Resources: briefing 2026-08-21 distributed cautious context to 3 bots from 2 sources (MACRO: CPI release; NEWS: Market briefing).");
+    expect(report.message).toContain("Macro added: US CPI");
+    expect(report.message).toContain("Upcoming macro guard: Fed decision");
+    expect(report.message).toContain("Bot scans: 4 completed, 1 skipped, 0 errors. No scan: Laura.");
   });
 
   it("upserts the period report without resetting completed delivery timestamps", async () => {
@@ -36,6 +44,7 @@ describe("Bot Manager reports", () => {
           { runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", _count: { _all: 2 } },
           { runMode: "OFF", lifeStatus: "ACTIVE", _count: { _all: 1 } },
         ]),
+        findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Bob", lifeStatus: "ACTIVE" }]),
       },
       order: {
         groupBy: vi.fn().mockResolvedValue([
@@ -43,6 +52,9 @@ describe("Bot Manager reports", () => {
           { status: "REJECTED", _count: { _all: 1 } },
         ]),
       },
+      botScanRun: { findMany: vi.fn().mockResolvedValue([{ botId: "bot-1", status: "COMPLETED", reason: "ANALYZED", startedAt: new Date() }]) },
+      dailyMarketBrief: { findMany: vi.fn().mockResolvedValue([]) },
+      macroCalendarEvent: { findMany: vi.fn().mockResolvedValue([]) },
       notificationAlert: { upsert: vi.fn().mockResolvedValue({ id: "report-1" }) },
     };
 
