@@ -23,6 +23,7 @@ import { appendCautiousDailyContext } from "@/modules/bot-chat/daily-chat-contex
 import { marketCycleResumeAt } from "@/modules/scheduler/schedule-policy";
 import { policyForAdaptiveTrade, resolveAdaptiveRiskPolicy } from "@/modules/bots/adaptive-risk";
 import { recordAdaptiveRiskAdjustment } from "@/modules/bots/adaptive-risk-audit";
+import { newYorkMarketDayStart } from "@/modules/market/new-york-market-day";
 
 const TIMEFRAME = "1Min";
 const BAR_HISTORY = 60;
@@ -193,7 +194,7 @@ async function evaluateBotForBar(input: { bot: ActiveBot; symbol: string; candle
       select: { id: true, title: true, impact: true, startsAt: true, sourceUrl: true, beforeMinutes: true, afterMinutes: true }
     });
     const macroGuard = activeMacroGuard(macroEvents, macroNow);
-    const tradesToday = await prisma.tradeProposal.count({ where: { botId: input.bot.id, action: { not: TradeAction.HOLD }, createdAt: { gte: new Date(new Date().setUTCHours(0, 0, 0, 0)) } } });
+    const tradesToday = await prisma.tradeProposal.count({ where: { botId: input.bot.id, action: { not: TradeAction.HOLD }, createdAt: { gte: newYorkMarketDayStart(macroNow), lte: macroNow } } });
     const pnl = await realizedPnlWindows(prisma.fill, input.bot.id);
     const result = await recordProposedTrade({
       botId: input.bot.id,

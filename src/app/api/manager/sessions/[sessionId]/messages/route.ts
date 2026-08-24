@@ -17,7 +17,7 @@ async function requireManagerUser() {
 export async function GET(request: Request, context: { params: Promise<{ sessionId: string }> }) {
   try {
     const [user, params] = await Promise.all([requireManagerUser(), context.params]);
-    const session = await prisma.managerChatSession.findFirst({ where: { id: params.sessionId, userId: user.id }, select: { id: true } });
+    const session = await prisma.managerChatSession.findFirst({ where: { id: params.sessionId, userId: user.id, archivedAt: null }, select: { id: true } });
     if (!session) return NextResponse.json({ error: "MANAGER_SESSION_NOT_FOUND" }, { status: 404 });
     const before = new URL(request.url).searchParams.get("before");
     const rows = await prisma.managerChatMessage.findMany({ where: { sessionId: session.id }, ...(before ? { cursor: { id: before }, skip: 1 } : {}), orderBy: { createdAt: "desc" }, take: 51 });

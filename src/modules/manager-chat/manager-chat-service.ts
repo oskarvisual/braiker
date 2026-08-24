@@ -11,6 +11,7 @@ import { managerMarketClockContext } from "./manager-market-context";
 import { buildManagerSystemReport, isSystemReportRequest } from "./system-report";
 import { getSystemStatus, type SystemStatus } from "@/modules/monitoring/system-status";
 import { buildBotManagerReport, collectBotManagerReportInput } from "@/modules/manager-reports/bot-manager-reports";
+import { buildBotInformationReply, exactNamedBot, parseBotInformationRequest, readBotInformation } from "@/modules/bot-chat/bot-information";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
@@ -45,11 +46,27 @@ export async function createManagerConversation(userId: string, title: string, d
   });
 }
 
+export async function renameManagerConversation(input: { userId: string; sessionId: string; title: string }, db: ManagerSessionDb) {
+  const title = sanitizeManagerMessage(input.title).slice(0, 120);
+  if (!title) throw new Error("MANAGER_SESSION_TITLE_REQUIRED");
+  const session = await db.managerChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, archivedAt: null }, select: { id: true, pinned: true } });
+  if (!session) throw new Error("MANAGER_SESSION_NOT_FOUND");
+  if (session.pinned) throw new Error("MANAGER_OPERATIONS_SESSION_PROTECTED");
+  return db.managerChatSession.update({ where: { id: session.id }, data: { title } });
+}
+
+export async function archiveManagerConversation(input: { userId: string; sessionId: string }, db: ManagerSessionDb) {
+  const session = await db.managerChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, archivedAt: null }, select: { id: true, pinned: true } });
+  if (!session) throw new Error("MANAGER_SESSION_NOT_FOUND");
+  if (session.pinned) throw new Error("MANAGER_OPERATIONS_SESSION_PROTECTED");
+  return db.managerChatSession.update({ where: { id: session.id }, data: { archivedAt: new Date() } });
+}
+
 /** Returns only this user's sessions and bounded recent messages for the dashboard. */
 export async function listManagerConversations(userId: string, db: ManagerSessionDb) {
   await ensureOperationsSession(userId, db);
   const sessions = await db.managerChatSession.findMany({
-    where: { userId },
+    where: { userId, archivedAt: null },
     orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
     include: { messages: { orderBy: { createdAt: "desc" }, take: 100 } }
   });
@@ -207,12 +224,23 @@ async function prepareManagerSystemReport(content: string, db: ManagerChatDb, st
   return { reply: buildManagerSystemReport(systemStatus, buildBotManagerReport(dailyInput).message) };
 }
 
+async function prepareManagerBotInformation(content: string, db: ManagerChatDb) {
+  const request = parseBotInformationRequest(content);
+  if (!request) return null;
+  const bots = await db.botInstance.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" }, take: 100 });
+  const bot = exactNamedBot(content, bots);
+  if (!bot) return { reply: "Please include the exact bot name for an informational status. No bot data was changed." };
+  const information = await readBotInformation(bot.id, db);
+  if (!information) return { reply: "That bot is no longer available for an informational status." };
+  return { reply: buildBotInformationReply({ ...information, locale: /[¿áéíóúñ]|\b(?:cuantas|cuantos|operaciones|dinero|capital|estado|resumen)\b/i.test(content) ? "es" : "en" }) };
+}
+
 /**
  * Stores a user message then produces a read-only response. Provider failures
  * cannot affect worker execution, risk, bot power, capital, or Kill Switches.
  */
 export async function sendManagerMessage(input: SendManagerMessageInput, dependencies: ManagerChatDependencies) {
-  const session = await dependencies.db.managerChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId }, select: { id: true } });
+  const session = await dependencies.db.managerChatSession.findFirst({ where: { id: input.sessionId, userId: input.userId, archivedAt: null }, select: { id: true, title: true, pinned: true } });
   if (!session) throw new Error("MANAGER_SESSION_NOT_FOUND");
 
   const content = sanitizeManagerMessage(input.content);
@@ -232,6 +260,10 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
       data: { sessionId: session.id, sourceReference: input.sourceReference, role: "USER", source: input.source ?? "WEB", content }
     });
     currentMessageId = message.id;
+    if (!session.pinned && session.title === "New conversation") {
+      const title = sanitizeManagerMessage(content).replace(/\s+/g, " ").slice(0, 120);
+      if (title) await dependencies.db.managerChatSession.updateMany({ where: { id: session.id, title: "New conversation" }, data: { title } });
+    }
   }
 
   if (input.actorRole && input.requestedVia) {
@@ -261,6 +293,11 @@ export async function sendManagerMessage(input: SendManagerMessageInput, depende
     if (systemReport) {
       await storeAssistantReply(session.id, systemReport.reply, dependencies.db, replyReference);
       return { reply: systemReport.reply, available: true };
+    }
+    const information = await prepareManagerBotInformation(content, dependencies.db);
+    if (information) {
+      await storeAssistantReply(session.id, information.reply, dependencies.db, replyReference);
+      return { reply: information.reply, available: true };
     }
     if (input.actorRole !== "ADMIN") {
       const learning = parseManagerLearningCommand(content);

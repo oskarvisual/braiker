@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { appendManagerAlert, createManagerConversation, ensureOperationsSession, listManagerConversations, sendManagerMessage } from "./manager-chat-service";
+import { appendManagerAlert, createManagerConversation, ensureOperationsSession, listManagerConversations, renameManagerConversation, sendManagerMessage } from "./manager-chat-service";
 
 describe("Bot Manager chat service", () => {
   it("creates exactly one pinned Operations session for a user", async () => {
@@ -31,6 +31,24 @@ describe("Bot Manager chat service", () => {
     const db = { managerChatSession: { create } } as never;
     await createManagerConversation("11111111-1111-4111-8111-111111111111", "  Research plan  ", db);
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: "CONVERSATION", pinned: false, title: "Research plan" }) });
+  });
+
+  it("renames only an owned, non-pinned Manager conversation", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "chat-1", pinned: false });
+    const update = vi.fn().mockResolvedValue({ id: "chat-1", title: "Capital review" });
+
+    await expect(renameManagerConversation({ userId: "user-1", sessionId: "chat-1", title: "  Capital review  " }, { managerChatSession: { findFirst, update } } as never)).resolves.toMatchObject({ title: "Capital review" });
+    expect(findFirst).toHaveBeenCalledWith({ where: { id: "chat-1", userId: "user-1", archivedAt: null }, select: { id: true, pinned: true } });
+    expect(update).toHaveBeenCalledWith({ where: { id: "chat-1" }, data: { title: "Capital review" } });
+  });
+
+  it("never exposes archived Manager conversations in the active list", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const db = { managerChatSession: { upsert: vi.fn().mockResolvedValue({ id: "operations" }), findMany } } as never;
+
+    await listManagerConversations("user-1", db);
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: "user-1", archivedAt: null } }));
   });
 
   it("returns the newest display window in chronological order", async () => {
@@ -156,6 +174,37 @@ describe("Bot Manager chat service", () => {
     expect(result.reply).toContain("MySQL database: HEALTHY");
     expect(result.reply).toContain("Daily operating report");
     expect(result.reply).toContain("Scans:\n1 completed");
+  });
+
+  it("returns an exact named-bot status without asking the conversational model", async () => {
+    const responder = { reply: vi.fn() };
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "operations", title: "Bot Manager · Operations", pinned: true }) },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}) },
+      botInstance: {
+        findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Bob trAIder" }]),
+        findUnique: vi.fn().mockResolvedValue({ id: "bot-1", name: "Bob trAIder", riskPolicy: { maxTradesPerDay: 4 }, adaptiveRiskEnabled: false, initialCapital: { toString: () => "20" }, currentCapital: { toString: () => "12.5" }, reservedCapital: { toString: () => "2.16" }, botPositions: [] })
+      },
+      tradeProposal: { count: vi.fn().mockResolvedValue(4) }
+    } as never;
+
+    const result = await sendManagerMessage({ userId: "user-1", sessionId: "operations", content: "¿Cuántas operaciones restantes tiene Bob trAIder hoy?", actorRole: "ADMIN", requestedVia: "WEB" }, { db, responder, aiEnabled: false });
+
+    expect(responder.reply).not.toHaveBeenCalled();
+    expect(result.reply).toContain("Operaciones restantes: 0");
+  });
+
+  it("does not replace a manually assigned conversation title", async () => {
+    const updateMany = vi.fn();
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "manual", title: "Capital review", pinned: false }), updateMany },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}) },
+      aiRuntimeState: { findUnique: vi.fn().mockResolvedValue({ status: "QUOTA_EXHAUSTED" }) }
+    } as never;
+
+    await sendManagerMessage({ userId: "user-1", sessionId: "manual", content: "Explain the latest scan" }, { db, responder: { reply: vi.fn() }, aiEnabled: true });
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("does not ask the provider twice when a Telegram update is replayed", async () => {

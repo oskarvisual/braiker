@@ -28,7 +28,7 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
     const { botId } = await context.params;
     const user = await authorize(botId);
     const bot = await prisma.botInstance.findUnique({ where: { id: botId }, select: { runMode: true, lifeStatus: true, status: true, killSwitch: true } });
-    const sessions = await prisma.botChatSession.findMany({ where: { userId: user.id, botId }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, kind: true, createdAt: true, updatedAt: true } });
+    const sessions = await prisma.botChatSession.findMany({ where: { userId: user.id, botId, archivedAt: null }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, kind: true, createdAt: true, updatedAt: true } });
     const url = new URL(request.url);
     const requestedSessionId = url.searchParams.get("sessionId");
     const selectedSession = sessions.find((session) => session.id === requestedSessionId) ?? sessions[0] ?? null;
