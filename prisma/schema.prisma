@@ -144,6 +144,7 @@ model User {
   managerActionProposals ManagerActionProposal[]
   resourceSources ResourceSource[]
   learnedInstructions BotLearnedInstruction[]
+  botImportReceipts BotImportReceipt[]
   macroCalendarEvents MacroCalendarEvent[]
   resolvedLearningProposals BotLearningProposal[] @relation("LearningProposalResolver")
 }
@@ -365,6 +366,7 @@ model BotInstance {
   learnedInstructions BotLearnedInstruction[]
   learningProposals BotLearningProposal[]
   riskAdjustments BotRiskAdjustment[]
+  importReceipts BotImportReceipt[]
   @@index([walletId, status])
   @@index([cloneSourceId])
 }
@@ -401,6 +403,23 @@ model BotLearnedInstruction {
   @@unique([botId, revision])
   @@index([botId, active, createdAt])
   @@index([createdById, createdAt])
+}
+
+/// A deduplicated, sanitized receipt for a configuration-only bot import.
+/// It proves who imported which portable package without retaining runtime or
+/// broker data, and prevents the same content hash from being imported twice.
+model BotImportReceipt {
+  id            String      @id @default(uuid()) @db.Char(36)
+  packageHash   String      @unique @db.Char(64)
+  schemaVersion Int
+  manifest      Json
+  importedById  String      @db.Char(36)
+  botId         String      @db.Char(36)
+  createdAt     DateTime    @default(now()) @db.DateTime(3)
+  importedBy    User        @relation(fields: [importedById], references: [id], onDelete: Restrict)
+  bot           BotInstance @relation(fields: [botId], references: [id], onDelete: Restrict)
+  @@index([botId, createdAt])
+  @@index([importedById, createdAt])
 }
 
 /// A bot may suggest a bounded caution rule after deterministic evidence, but

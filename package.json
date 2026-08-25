@@ -16,7 +16,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run --maxWorkers=1 src/modules/security/security.mysql.integration.test.ts src/modules/market/bot-scan-activity.mysql.integration.test.ts src/modules/market/market-cycle-schedule.mysql.integration.test.ts src/modules/telegram/bot-manager.mysql.integration.test.ts src/modules/manager-chat/manager-chat.mysql.integration.test.ts src/modules/resources/macro-guard.mysql.integration.test.ts src/modules/bot-chat/bot-chat.mysql.integration.test.ts src/modules/bots/adaptive-risk.mysql.integration.test.ts src/modules/watchlist/asset-universe-sync.mysql.integration.test.ts src/modules/capital/operating-cost-service.mysql.integration.test.ts",
+    "test:integration": "vitest run --maxWorkers=1 src/modules/security/security.mysql.integration.test.ts src/modules/market/bot-scan-activity.mysql.integration.test.ts src/modules/market/market-cycle-schedule.mysql.integration.test.ts src/modules/telegram/bot-manager.mysql.integration.test.ts src/modules/manager-chat/manager-chat.mysql.integration.test.ts src/modules/resources/macro-guard.mysql.integration.test.ts src/modules/bot-chat/bot-chat.mysql.integration.test.ts src/modules/bots/adaptive-risk.mysql.integration.test.ts src/modules/bots/bot-import.mysql.integration.test.ts src/modules/watchlist/asset-universe-sync.mysql.integration.test.ts src/modules/capital/operating-cost-service.mysql.integration.test.ts",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
