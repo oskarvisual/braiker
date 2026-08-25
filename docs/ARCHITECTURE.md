@@ -141,6 +141,10 @@ Client feedback translates current domain error codes into contextual notices; r
 
 Bot creation performs the same pure capital validation in the client for early feedback, but the API transaction remains authoritative and repeats the validation before reserving wallet capital.
 
+`GET /api/bots/[botId]/export` is Admin-only and emits a `braiker.bot.config` version-1 JSON attachment with a SHA-256 hash over canonical portable configuration. `POST /api/bots/import` is Admin-only, repeats enabled-symbol, destination-profile, and atomic wallet-budget validation, and stores a unique `BotImportReceipt` with a sanitized manifest and import actor. Its transaction creates only a new `OFF`/`PAUSED`/Kill-Switched `BotInstance`, its watchlist, capital allocation event, and copied learning revisions; it cannot copy runtime, broker, financial, or secret data. The receipt's unique hash makes a replay reject deterministically.
+
+Asset views derive mark-to-market values from durable `BotPosition` attribution and the corresponding latest global Paper `Position`: `marketValue / quantity` is the implied synchronized price, multiplied by the attributed bot quantity using Prisma Decimal. No endpoint, client, worker, or risk path may substitute average entry price when the global valuation is absent. The Setup page, bot-history API/modal, and Dashboard return/display `Unavailable — sync Alpaca` for an unpriced attributed symbol; asset totals and Dashboard allocation are withheld rather than partially estimated. These values are observational only and never mutate risk, capital, survival, or execution.
+
 ## Environment reference
 
 `.env.example` is the canonical variable list. Never place actual values in README or docs.

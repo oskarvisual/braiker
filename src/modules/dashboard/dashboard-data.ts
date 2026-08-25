@@ -2,6 +2,7 @@ import { Prisma, type User } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { GLOBAL_PAPER_WALLET_ID } from "@/modules/broker/global-paper";
 import { botCapitalBreakdown, positiveEquitySnapshots } from "@/modules/dashboard/dashboard-metrics";
+import { valueBotAssets } from "@/modules/bots/bot-asset-valuation";
 
 const value = (input: { toString(): string }) => input.toString();
 
@@ -19,8 +20,9 @@ export async function getDashboardData(user: Pick<User, "id" | "role">) {
     prisma.portfolioSnapshot.findMany({ where: { walletId: brokerWalletId, botId: null, equity: { gt: 0 }, capturedAt: { gte: new Date(Date.now() - 7 * 86_400_000) } }, orderBy: { capturedAt: "asc" } }),
     prisma.position.findMany({ where: { walletId: brokerWalletId }, orderBy: { marketValue: "desc" } }),
     prisma.brokerOrderSnapshot.findMany({ where: { walletId: brokerWalletId }, orderBy: { submittedAt: "desc" }, take: 8 }),
-    prisma.botInstance.findMany({ where: { walletId: { in: walletIds } }, include: { watchlist: { where: { enabled: true }, orderBy: { symbol: "asc" } } }, orderBy: { createdAt: "asc" } })
+    prisma.botInstance.findMany({ where: { walletId: { in: walletIds } }, include: { watchlist: { where: { enabled: true }, orderBy: { symbol: "asc" } }, botPositions: { where: { quantity: { gt: 0 } }, select: { symbol: true, quantity: true, averageEntryPrice: true } } }, orderBy: { createdAt: "asc" } })
   ]);
+  const assetValuation = valueBotAssets({ positions: bots.flatMap((bot) => bot.botPositions.map((position) => ({ botId: bot.id, symbol: position.symbol, quantity: value(position.quantity), averageEntryPrice: value(position.averageEntryPrice) }))), globalPositions: positions.map((position) => ({ symbol: position.symbol, quantity: value(position.quantity), marketValue: value(position.marketValue), updatedAt: position.updatedAt.toISOString() })) });
   const validSnapshots = positiveEquitySnapshots(snapshots.map((snapshot) => ({ capturedAt: snapshot.capturedAt.toISOString(), equity: value(snapshot.equity) })));
   const firstEquity = validSnapshots[0]?.equity ?? latestSnapshot?.equity.toString() ?? null;
   const lastEquity = latestSnapshot?.equity.toString() ?? validSnapshots.at(-1)?.equity ?? null;
@@ -31,6 +33,7 @@ export async function getDashboardData(user: Pick<User, "id" | "role">) {
     chart: validSnapshots,
     positions: positions.map((position) => ({ symbol: position.symbol, quantity: value(position.quantity), marketValue: value(position.marketValue), averageEntryPrice: value(position.averageEntryPrice), unrealizedPnl: value(position.unrealizedPnl) })),
     orders: orders.map((order) => ({ id: order.id, symbol: order.symbol, side: order.side, orderType: order.orderType, status: order.status, quantity: value(order.quantity), filledQuantity: value(order.filledQuantity), filledAveragePrice: order.filledAveragePrice?.toString() ?? null, submittedAt: order.submittedAt.toISOString() })),
-    bots: bots.map((bot) => ({ id: bot.id, name: bot.name, templateId: bot.templateId, avatarSeed: bot.avatarSeed, runMode: bot.runMode, lifeStatus: bot.lifeStatus, currentCapital: value(bot.currentCapital), initialCapital: value(bot.initialCapital), symbols: bot.watchlist.map((item) => item.symbol) }))
+    bots: bots.map((bot) => ({ id: bot.id, name: bot.name, templateId: bot.templateId, avatarSeed: bot.avatarSeed, runMode: bot.runMode, lifeStatus: bot.lifeStatus, currentCapital: value(bot.currentCapital), initialCapital: value(bot.initialCapital), symbols: bot.watchlist.map((item) => item.symbol), assets: assetValuation.byBot[bot.id] ?? { value: "0", valuedAt: null, unpricedSymbols: [] } })),
+    botAssetAllocation: { totalValue: assetValuation.totalValue, valuedAt: assetValuation.valuedAt, unpricedSymbols: assetValuation.unpricedSymbols, items: assetValuation.allocation }
   };
 }
