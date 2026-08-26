@@ -1,4 +1,4 @@
-import type { PrismaClient, UserRole } from "@prisma/client";
+import { Prisma, type PrismaClient, type UserRole } from "@prisma/client";
 import { disableAiRuntimeForQuota, getAiRuntimeState } from "@/modules/ai/ai-runtime-state";
 import { managerUnavailableReply, sanitizeManagerMessage } from "./manager-chat";
 import type { ManagerChatHistoryItem, ManagerChatRequest } from "./openai-manager-chat";
@@ -12,12 +12,15 @@ import { buildManagerSystemReport, isSystemReportRequest } from "./system-report
 import { getSystemStatus, type SystemStatus } from "@/modules/monitoring/system-status";
 import { buildBotManagerReport, collectBotManagerReportInput } from "@/modules/manager-reports/bot-manager-reports";
 import { buildBotInformationReply, exactNamedBot, parseBotInformationRequest, readBotInformation } from "@/modules/bot-chat/bot-information";
+import { calculateBotPerformance } from "@/modules/bots/bot-performance";
+import { valueBotAssets, valueBotPositionRows } from "@/modules/bots/bot-asset-valuation";
+import { GLOBAL_PAPER_WALLET_ID } from "@/modules/broker/global-paper";
 
 export const operationsSessionKey = (userId: string) => `operations:${userId}`;
 
 type ManagerSessionDb = Pick<PrismaClient, "managerChatSession">;
 type ManagerAlertDb = Pick<PrismaClient, "managerChatSession" | "managerChatMessage">;
-type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "botPosition" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext" | "botLearnedInstruction" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog">;
+type ManagerChatDb = ManagerAlertDb & Pick<PrismaClient, "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" | "order" | "botPosition" | "position" | "botCapitalEvent" | "fill" | "operatingCostAllocation" | "botRiskAdjustment" | "botPerformanceSnapshot" | "managerActionProposal" | "botChatSession" | "botChatMessage" | "botDailyContext" | "botLearnedInstruction" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog">;
 
 export type ManagerResponder = {
   reply(request: ManagerChatRequest): Promise<string>;
@@ -169,19 +172,41 @@ async function safeOperationalContext(db: ManagerChatDb, message: string) {
 
 /** A named bot gets bounded evidence, never credentials, wallets, or mutable controls. */
 async function detailedBotContext(botId: string, db: ManagerChatDb) {
-  const [proposals, scans, positions] = await Promise.all([
+  const [bot, proposals, scans, capitalEvents, fills, operatingCosts, riskAdjustments, performanceSnapshots, globalPositions] = await Promise.all([
+    db.botInstance.findUnique({ where: { id: botId }, select: { id: true, name: true, templateId: true, lifeStatus: true, runMode: true, status: true, killSwitch: true, adaptiveRiskEnabled: true, initialCapital: true, currentCapital: true, reservedCapital: true, riskPolicy: true, watchlist: { where: { enabled: true }, select: { symbol: true } }, botPositions: { select: { symbol: true, quantity: true, averageEntryPrice: true } } } }),
     db.tradeProposal.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 20, select: { symbol: true, action: true, status: true, estimatedPrice: true, createdAt: true, riskDecision: { select: { approved: true, reason: true, createdAt: true } } } }),
     db.botScanRun.findMany({ where: { botId }, orderBy: { startedAt: "desc" }, take: 20, select: { status: true, reason: true, message: true, startedAt: true, completedAt: true } }),
-    db.botPosition.findMany({ where: { botId }, orderBy: { updatedAt: "desc" }, take: 50, select: { symbol: true, quantity: true, averageEntryPrice: true, updatedAt: true } })
+    db.botCapitalEvent.findMany({ where: { botId }, orderBy: { createdAt: "asc" }, select: { kind: true, amount: true } }),
+    db.fill.aggregate({ where: { botId }, _sum: { realizedPnl: true } }),
+    db.operatingCostAllocation.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 25, select: { billingMonth: true, monthlyCost: true, allocatedAmount: true, chargedAmount: true, unpaidAmount: true, capitalBefore: true, capitalAfter: true, createdAt: true } }),
+    db.botRiskAdjustment.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 25, select: { level: true, reason: true, basePolicy: true, effectivePolicy: true, createdAt: true } }),
+    db.botPerformanceSnapshot.findMany({ where: { botId }, orderBy: { marketDate: "desc" }, take: 90, select: { marketDate: true, liquidCapital: true, assetValue: true, equity: true, capturedAt: true } }),
+    db.position.findMany({ where: { walletId: GLOBAL_PAPER_WALLET_ID }, select: { symbol: true, quantity: true, marketValue: true, updatedAt: true } })
   ]);
   const proposalIds = await db.tradeProposal.findMany({ where: { botId }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true } });
   const orders = proposalIds.length ? await db.order.findMany({ where: { proposalId: { in: proposalIds.map((proposal) => proposal.id) } }, orderBy: { createdAt: "desc" }, take: 20, select: { symbol: true, action: true, status: true, quantity: true, createdAt: true, fills: { select: { quantity: true, price: true, realizedPnl: true, filledAt: true }, take: 20 } } }) : [];
+  if (!bot) return null;
+  const positionInputs = bot.botPositions.map((position) => ({ botId, symbol: position.symbol, quantity: decimalString(position.quantity), averageEntryPrice: decimalString(position.averageEntryPrice) }));
+  const globalPositionInputs = globalPositions.map((position) => ({ symbol: position.symbol, quantity: decimalString(position.quantity), marketValue: decimalString(position.marketValue), updatedAt: position.updatedAt.toISOString() }));
+  const assets = valueBotAssets({ positions: positionInputs, globalPositions: globalPositionInputs }).byBot[botId] ?? { value: "0", valuedAt: null, unpricedSymbols: [] };
+  const operatingCostsTotal = capitalEvents.filter((event) => event.kind === "OPERATING_COST").reduce((total, event) => total.plus(new Prisma.Decimal(event.amount).abs()), new Prisma.Decimal(0)).toString();
+  const performance = calculateBotPerformance({ initialCapital: decimalString(bot.initialCapital), currentCapital: decimalString(bot.currentCapital), assetValue: assets.value, positions: positionInputs, capitalEvents: capitalEvents.map((event) => ({ kind: event.kind, amount: decimalString(event.amount) })), realizedPnl: decimalString(fills._sum.realizedPnl), operatingCosts: operatingCostsTotal });
   return {
+    modal: {
+      configuration: { name: bot.name, templateId: bot.templateId, power: bot.runMode === "PAPER_ACTIVE" ? "ON" : "OFF", life: bot.lifeStatus, status: bot.status, killSwitch: bot.killSwitch, adaptiveRiskEnabled: bot.adaptiveRiskEnabled, riskPolicy: bot.riskPolicy, symbols: bot.watchlist.map((watch) => watch.symbol) },
+      capital: { initialCapital: decimalString(bot.initialCapital), currentCapital: decimalString(bot.currentCapital), reservedCapital: decimalString(bot.reservedCapital) },
+      assets,
+      assetPositions: valueBotPositionRows({ positions: positionInputs.map(({ botId: _botId, ...position }) => position), globalPositions: globalPositionInputs }),
+      performance,
+      performanceHistory: performanceSnapshots.reverse().map((snapshot) => ({ marketDate: snapshot.marketDate.toISOString(), liquidCapital: decimalString(snapshot.liquidCapital), assets: decimalString(snapshot.assetValue), equity: decimalString(snapshot.equity), capturedAt: snapshot.capturedAt.toISOString() })),
+      operatingCosts: operatingCosts.map((cost) => ({ ...cost, billingMonth: cost.billingMonth.toISOString(), monthlyCost: decimalString(cost.monthlyCost), allocatedAmount: decimalString(cost.allocatedAmount), chargedAmount: decimalString(cost.chargedAmount), unpaidAmount: decimalString(cost.unpaidAmount), capitalBefore: decimalString(cost.capitalBefore), capitalAfter: decimalString(cost.capitalAfter), createdAt: cost.createdAt.toISOString() })),
+      adaptiveRiskAdjustments: riskAdjustments.map((adjustment) => ({ ...adjustment, createdAt: adjustment.createdAt.toISOString() }))
+    },
     botId,
     orders: orders.map((order) => ({ ...order, quantity: decimalString(order.quantity), createdAt: order.createdAt.toISOString(), fills: order.fills.map((fill) => ({ quantity: decimalString(fill.quantity), price: decimalString(fill.price), realizedPnl: decimalString(fill.realizedPnl), filledAt: fill.filledAt.toISOString() })) })),
     proposals: proposals.map((proposal) => ({ ...proposal, estimatedPrice: decimalString(proposal.estimatedPrice), createdAt: proposal.createdAt.toISOString(), riskDecision: proposal.riskDecision ? { ...proposal.riskDecision, createdAt: proposal.riskDecision.createdAt.toISOString() } : null })),
     scans: scans.map((scan) => ({ ...scan, startedAt: scan.startedAt.toISOString(), completedAt: scan.completedAt?.toISOString() ?? null })),
-    positions: positions.map((position) => ({ ...position, quantity: decimalString(position.quantity), averageEntryPrice: decimalString(position.averageEntryPrice), updatedAt: position.updatedAt.toISOString() }))
+    positions: bot.botPositions.map((position) => ({ symbol: position.symbol, quantity: decimalString(position.quantity), averageEntryPrice: decimalString(position.averageEntryPrice) }))
   };
 }
 

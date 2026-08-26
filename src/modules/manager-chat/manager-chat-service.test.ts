@@ -137,6 +137,33 @@ describe("Bot Manager chat service", () => {
     expect(result.reply).toContain("paused");
   });
 
+  it("gives the conversational Manager the named bot's modal performance context", async () => {
+    const responder = { reply: vi.fn().mockResolvedValue("Performance reviewed.") };
+    const decimal = (value: string) => ({ toString: () => value });
+    const db = {
+      managerChatSession: { findFirst: vi.fn().mockResolvedValue({ id: "conversation", title: "New conversation", pinned: false }), updateMany: vi.fn() },
+      managerChatMessage: { create: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]) },
+      aiRuntimeState: { findUnique: vi.fn().mockResolvedValue({ status: "ACTIVE" }) },
+      botInstance: {
+        findMany: vi.fn().mockResolvedValue([{ id: "bot-1", name: "Alpha", runMode: "PAPER_ACTIVE", lifeStatus: "ACTIVE", currentCapital: decimal("65"), reservedCapital: decimal("0"), updatedAt: new Date(), watchlist: [] }]),
+        findUnique: vi.fn().mockResolvedValue({ id: "bot-1", name: "Alpha", templateId: "NAVIGATOR", lifeStatus: "ACTIVE", runMode: "PAPER_ACTIVE", status: "RUNNING", killSwitch: false, adaptiveRiskEnabled: false, initialCapital: decimal("100"), currentCapital: decimal("65"), reservedCapital: decimal("0"), riskPolicy: {}, watchlist: [], botPositions: [{ symbol: "SPY", quantity: decimal("1"), averageEntryPrice: decimal("75") }] })
+      },
+      botScanRun: { findMany: vi.fn().mockResolvedValue([]) },
+      tradeProposal: { groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]) },
+      order: { findMany: vi.fn().mockResolvedValue([]) },
+      botCapitalEvent: { findMany: vi.fn().mockResolvedValue([{ kind: "ALLOCATION", amount: decimal("100") }]) },
+      fill: { aggregate: vi.fn().mockResolvedValue({ _sum: { realizedPnl: decimal("5") } }) },
+      operatingCostAllocation: { findMany: vi.fn().mockResolvedValue([]) },
+      botRiskAdjustment: { findMany: vi.fn().mockResolvedValue([]) },
+      botPerformanceSnapshot: { findMany: vi.fn().mockResolvedValue([{ marketDate: new Date("2026-08-26T00:00:00.000Z"), liquidCapital: decimal("65"), assetValue: decimal("90"), equity: decimal("155"), capturedAt: new Date("2026-08-26T20:00:00.000Z") }]) },
+      position: { findMany: vi.fn().mockResolvedValue([{ symbol: "SPY", quantity: decimal("10"), marketValue: decimal("900"), updatedAt: new Date("2026-08-26T20:00:00.000Z") }]) }
+    } as never;
+
+    await sendManagerMessage({ userId: "user-1", sessionId: "conversation", content: "Can you explain Alpha's performance?" }, { db, responder, aiEnabled: true });
+
+    expect(responder.reply).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ namedBot: expect.objectContaining({ modal: expect.objectContaining({ capital: { initialCapital: "100", currentCapital: "65", reservedCapital: "0" }, performance: expect.objectContaining({ startingCapital: "100", equity: "155", tradingPnl: "55" }), performanceHistory: [expect.objectContaining({ equity: "155" })] }) }) }) }));
+  });
+
   it("returns a deterministic daily operating and current-system report without calling the provider", async () => {
     const responder = { reply: vi.fn() };
     const db = {
