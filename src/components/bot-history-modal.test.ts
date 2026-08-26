@@ -16,4 +16,12 @@ describe("bot history chat actions", () => {
     expect(component).toContain("Monthly virtual operating cost charged");
     expect(component).toContain("data.scans.length + data.operatingCosts.length");
   });
+
+  it("exposes a performance view that separates capital flows from trading P&L", () => {
+    const component = readFileSync(resolve(process.cwd(), "src/components/bot-history-modal.tsx"), "utf8");
+
+    expect(component).toContain(">Performance</button>");
+    expect(component).toContain("Trading P&L excludes money added to or returned from the bot.");
+    expect(component).toContain("<PerformanceChart points={data.performanceHistory} />");
+  });
 });

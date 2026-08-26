@@ -62,6 +62,7 @@ describeMysql("security financial transaction boundaries (MySQL)", () => {
     await db.executionJob.deleteMany();
     await db.riskDecision.deleteMany();
     await db.tradeProposal.deleteMany();
+    await db.botPerformanceSnapshot.deleteMany();
     await db.botPosition.deleteMany();
     await db.botCapitalEvent.deleteMany();
     await db.botModeTransition.deleteMany();
@@ -77,6 +78,27 @@ describeMysql("security financial transaction boundaries (MySQL)", () => {
     const persisted = await db!.botInstance.findUniqueOrThrow({ where: { id: bot.id } });
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(persisted.reservedCapital.toString()).toBe("7");
+  });
+
+  it("keeps one replaceable daily equity observation per bot", async () => {
+    const bot = await makeBot({ currentCapital: "80" });
+    const marketDate = new Date("2026-08-26T00:00:00.000Z");
+    await db!.botPerformanceSnapshot.upsert({
+      where: { botId_marketDate: { botId: bot.id, marketDate } },
+      create: { botId: bot.id, marketDate, liquidCapital: "80", assetValue: "90", equity: "170", capturedAt: new Date("2026-08-26T15:00:00.000Z") },
+      update: {}
+    });
+    await db!.botPerformanceSnapshot.upsert({
+      where: { botId_marketDate: { botId: bot.id, marketDate } },
+      create: { botId: bot.id, marketDate, liquidCapital: "0", assetValue: "0", equity: "0", capturedAt: new Date("2026-08-26T16:00:00.000Z") },
+      update: { liquidCapital: "85", assetValue: "95", equity: "180", capturedAt: new Date("2026-08-26T16:00:00.000Z") }
+    });
+    const [snapshot] = await db!.botPerformanceSnapshot.findMany({ where: { botId: bot.id } });
+    expect(snapshot?.liquidCapital.toString()).toBe("85");
+    expect(snapshot?.assetValue.toString()).toBe("95");
+    expect(snapshot?.equity.toString()).toBe("180");
+    expect(snapshot?.capturedAt).toEqual(new Date("2026-08-26T16:00:00.000Z"));
+    expect(await db!.botPerformanceSnapshot.count({ where: { botId: bot.id } })).toBe(1);
   });
 
   it("claims a terminal reconciliation once and never releases a reservation twice", async () => {
