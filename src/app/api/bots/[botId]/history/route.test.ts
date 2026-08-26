@@ -66,4 +66,19 @@ describe("GET /api/bots/[botId]/history pagination", () => {
       performanceHistory: [{ marketDate: "2026-08-25T00:00:00.000Z", liquidCapital: "75", assets: "85", equity: "160", capturedAt: "2026-08-25T20:00:00.000Z" }]
     });
   });
+
+  it("reads the newest 90 daily snapshots and returns them chronologically", async () => {
+    mocks.findSnapshots.mockResolvedValue([
+      { marketDate: new Date("2026-08-26T00:00:00.000Z"), liquidCapital: "100", assetValue: "0", equity: "100", capturedAt: new Date("2026-08-26T20:00:00.000Z") },
+      { marketDate: new Date("2026-08-25T00:00:00.000Z"), liquidCapital: "90", assetValue: "0", equity: "90", capturedAt: new Date("2026-08-25T20:00:00.000Z") }
+    ]);
+    const route = await import("./route");
+    const response = await route.GET(new Request("http://localhost/api/bots/bot-1/history"), { params: Promise.resolve({ botId: "bot-1" }) });
+
+    expect(mocks.findSnapshots).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { marketDate: "desc" }, take: 90 }));
+    await expect(response.json()).resolves.toMatchObject({ performanceHistory: [
+      { marketDate: "2026-08-25T00:00:00.000Z" },
+      { marketDate: "2026-08-26T00:00:00.000Z" }
+    ] });
+  });
 });

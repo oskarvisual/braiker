@@ -46,4 +46,20 @@ describe("bot performance", () => {
       tradingPnl: null
     }));
   });
+
+  it("preserves the original allocation for a legacy bot that has later top-ups but no allocation event", () => {
+    expect(calculateBotPerformance({
+      initialCapital: "150",
+      currentCapital: "150",
+      assetValue: "0",
+      positions: [],
+      capitalEvents: [{ kind: "TOP_UP", amount: "50" }],
+      realizedPnl: "0",
+      operatingCosts: "0"
+    })).toEqual(expect.objectContaining({
+      startingCapital: "100",
+      netContributions: "150",
+      tradingPnl: "0"
+    }));
+  });
 });

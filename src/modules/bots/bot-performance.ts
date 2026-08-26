@@ -37,10 +37,15 @@ export function calculateBotPerformance(input: {
   operatingCosts: string;
 }): BotPerformance {
   const allocation = input.capitalEvents.find((event) => event.kind === "ALLOCATION");
-  const startingCapital = allocation ? decimal(allocation.amount) : decimal(input.initialCapital);
-  const netContributions = input.capitalEvents
+  const externalFlows = input.capitalEvents
     .filter((event) => externalCapitalKinds.has(event.kind))
     .reduce((total, event) => total.plus(decimal(event.amount)), zero);
+  // Older bots can predate the immutable allocation event. `initialCapital`
+  // includes TOP_UPs, so remove those before using it as the original funding.
+  const topUps = input.capitalEvents.filter((event) => event.kind === "TOP_UP").reduce((total, event) => total.plus(decimal(event.amount)), zero);
+  const legacyStartingCapital = decimal(input.initialCapital).minus(topUps);
+  const startingCapital = allocation ? decimal(allocation.amount) : Prisma.Decimal.max(zero, legacyStartingCapital);
+  const netContributions = allocation ? externalFlows : externalFlows.plus(startingCapital);
   const liquidCapital = decimal(input.currentCapital);
   const realizedPnl = decimal(input.realizedPnl);
   const operatingCosts = decimal(input.operatingCosts);
