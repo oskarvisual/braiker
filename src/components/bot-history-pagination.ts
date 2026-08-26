@@ -1,4 +1,4 @@
-export type BotHistoryTab = "operations" | "analysis" | "adaptive" | "assets" | "chats";
+export type BotHistoryTab = "operations" | "analysis" | "adaptive" | "assets" | "performance" | "chats";
 
 export type BotHistoryPageAvailability = {
   orders: boolean;

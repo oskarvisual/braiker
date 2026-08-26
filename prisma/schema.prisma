@@ -357,6 +357,7 @@ model BotInstance {
   proposals      TradeProposal[]
   watchlist      Watchlist[]
   botPositions   BotPosition[]
+  performanceSnapshots BotPerformanceSnapshot[]
   portfolioSnapshots PortfolioSnapshot[]
   scanRuns       BotScanRun[]
   managerActionProposals ManagerActionProposal[]
@@ -453,6 +454,22 @@ model BotCapitalEvent {
   createdAt    DateTime    @default(now()) @db.DateTime(3)
   bot          BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
   @@index([botId, createdAt])
+}
+
+/// Daily mark-to-market per bot. It is observational: it never participates
+/// in risk, capital allocation, survival, or order execution.
+model BotPerformanceSnapshot {
+  id             String      @id @default(uuid()) @db.Char(36)
+  botId          String      @db.Char(36)
+  marketDate     DateTime    @db.Date
+  liquidCapital  Decimal     @db.Decimal(28, 12)
+  assetValue     Decimal     @db.Decimal(28, 12)
+  equity         Decimal     @db.Decimal(28, 12)
+  capturedAt     DateTime    @db.DateTime(3)
+  createdAt      DateTime    @default(now()) @db.DateTime(3)
+  bot            BotInstance @relation(fields: [botId], references: [id], onDelete: Cascade)
+  @@unique([botId, marketDate])
+  @@index([botId, capturedAt])
 }
 
 /// Durable, per-bot virtual operating-cost ledger. This never represents an

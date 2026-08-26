@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { globalPaperBroker, GLOBAL_PAPER_WALLET_ID } from "@/modules/broker/global-paper";
 import { applyBotFill, releaseBotReservation } from "@/modules/capital/fill-accounting";
 import { proposeLearningFromLoss } from "@/modules/bots/learning-proposal-service";
+import { valueBotAssets } from "@/modules/bots/bot-asset-valuation";
+import { newYorkMarketDate } from "@/modules/resources/daily-market-brief";
 
 type AlpacaOrderPayload = {
   symbol?: string; side?: string; type?: string; qty?: string; filled_qty?: string; filled_avg_price?: string | null; submitted_at?: string; filled_at?: string | null;
@@ -142,6 +144,7 @@ export async function syncGlobalPaperAccount() {
   const adapter = globalPaperBroker();
   const [account, positions, orders, history] = await Promise.all([adapter.getAccount(), adapter.getPositions(), adapter.getOrders(), adapter.getPortfolioHistory()]);
   const snapshotPoints = [...history, { capturedAt: new Date(), equity: account.equity }];
+  const synchronizedAt = new Date();
   await prisma.$transaction(async (tx) => {
     await tx.position.deleteMany({ where: { walletId } });
     if (positions.length) await tx.position.createMany({ data: positions.map((position) => ({ walletId, symbol: position.symbol, quantity: position.quantity, averageEntryPrice: position.averageEntryPrice, marketValue: position.marketValue, unrealizedPnl: "0" })) });
@@ -162,8 +165,32 @@ export async function syncGlobalPaperAccount() {
       });
       await reconcileBotOrder(tx, order);
     }
+    const bots = await tx.botInstance.findMany({
+      select: {
+        id: true,
+        currentCapital: true,
+        botPositions: { where: { quantity: { gt: 0 } }, select: { symbol: true, quantity: true, averageEntryPrice: true } }
+      }
+    });
+    const assetValues = valueBotAssets({
+      positions: bots.flatMap((bot) => bot.botPositions.map((position) => ({ botId: bot.id, symbol: position.symbol, quantity: position.quantity.toString(), averageEntryPrice: position.averageEntryPrice.toString() }))),
+      globalPositions: positions.map((position) => ({ symbol: position.symbol, quantity: position.quantity.toString(), marketValue: position.marketValue.toString(), updatedAt: synchronizedAt.toISOString() }))
+    }).byBot;
+    const marketDate = newYorkMarketDate(synchronizedAt);
+    for (const bot of bots) {
+      const assets = assetValues[bot.id] ?? { value: "0", valuedAt: null, unpricedSymbols: [] };
+      // Never substitute entry price for a missing Alpaca valuation. A later
+      // complete synchronization can safely replace the day's observation.
+      if (assets.value === null) continue;
+      const assetValue = new Prisma.Decimal(assets.value);
+      await tx.botPerformanceSnapshot.upsert({
+        where: { botId_marketDate: { botId: bot.id, marketDate } },
+        create: { botId: bot.id, marketDate, liquidCapital: bot.currentCapital, assetValue, equity: bot.currentCapital.plus(assetValue), capturedAt: synchronizedAt },
+        update: { liquidCapital: bot.currentCapital, assetValue, equity: bot.currentCapital.plus(assetValue), capturedAt: synchronizedAt }
+      });
+    }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  return { walletId, equity: account.equity, cash: account.cash, buyingPower: account.buyingPower, positions: positions.length, orders: orders.length, synchronizedAt: new Date() };
+  return { walletId, equity: account.equity, cash: account.cash, buyingPower: account.buyingPower, positions: positions.length, orders: orders.length, synchronizedAt };
 }
 
 export async function ensureGlobalPaperWallet() {
