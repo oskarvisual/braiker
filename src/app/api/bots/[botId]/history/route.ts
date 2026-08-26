@@ -34,7 +34,7 @@ export async function GET(request: Request, context: { params: Promise<{ botId: 
       adaptiveRiskAdjustments: adjustments.items.map((adjustment) => ({ id: adjustment.id, level: adjustment.level, reason: adjustment.reason, basePolicy: adjustment.basePolicy, effectivePolicy: adjustment.effectivePolicy, createdAt: adjustment.createdAt.toISOString() })),
       operatingCosts: operatingCosts.items.map((cost) => ({ id: cost.id, billingMonth: cost.billingMonth.toISOString(), monthlyCost: cost.monthlyCost.toString(), allocatedAmount: cost.allocatedAmount.toString(), chargedAmount: cost.chargedAmount.toString(), unpaidAmount: cost.unpaidAmount.toString(), capitalBefore: cost.capitalBefore.toString(), capitalAfter: cost.capitalAfter.toString(), createdAt: cost.createdAt.toISOString() })),
       page,
-      hasMore: orders.hasMore || adjustments.hasMore || operatingCosts.hasMore
+      hasMore: { orders: orders.hasMore, adjustments: adjustments.hasMore, operatingCosts: operatingCosts.hasMore }
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "UNKNOWN" }, { status: 400 });
