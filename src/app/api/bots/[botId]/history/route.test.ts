@@ -27,7 +27,15 @@ describe("GET /api/bots/[botId]/history pagination", () => {
     expect(mocks.findOrders).toHaveBeenCalledWith(expect.objectContaining({ skip: 75, take: 26 }));
     expect(mocks.findAdjustments).toHaveBeenCalledWith(expect.objectContaining({ skip: 75, take: 26 }));
     expect(mocks.findCosts).toHaveBeenCalledWith(expect.objectContaining({ skip: 75, take: 26 }));
-    await expect(response.json()).resolves.toMatchObject({ page: 4, hasMore: false, orders: [], adaptiveRiskAdjustments: [], operatingCosts: [] });
+    await expect(response.json()).resolves.toMatchObject({ page: 4, hasMore: { orders: false, adjustments: false, operatingCosts: false }, orders: [], adaptiveRiskAdjustments: [], operatingCosts: [] });
+  });
+
+  it("keeps each history type's remaining-page indicator separate", async () => {
+    mocks.findCosts.mockResolvedValue(Array.from({ length: 26 }, (_, index) => ({ id: `cost-${index}`, billingMonth: new Date("2026-08-01T00:00:00.000Z"), monthlyCost: "10", allocatedAmount: "10", chargedAmount: "10", unpaidAmount: "0", capitalBefore: "100", capitalAfter: "90", createdAt: new Date("2026-08-01T00:00:00.000Z") })));
+    const route = await import("./route");
+    const response = await route.GET(new Request("http://localhost/api/bots/bot-1/history?page=1"), { params: Promise.resolve({ botId: "bot-1" }) });
+
+    await expect(response.json()).resolves.toMatchObject({ hasMore: { orders: false, adjustments: false, operatingCosts: true } });
   });
 
   it("rejects a bot outside the caller wallet before loading history", async () => {
