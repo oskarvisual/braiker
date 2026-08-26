@@ -79,7 +79,7 @@ function telegramApi(token: string): TelegramApi {
 type TelegramDb = Pick<typeof prisma,
   "telegramRuntimeState" | "telegramPairingCode" | "telegramManagerSession" | "telegramManagerMessage" | "notificationSettings" |
   "managerChatSession" | "managerChatMessage" | "managerActionProposal" | "aiRuntimeState" | "botInstance" | "botScanRun" | "tradeProposal" |
-  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "botLearnedInstruction" | "botLearningProposal" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog"
+  "botChatSession" | "botChatMessage" | "botDailyContext" | "order" | "botPosition" | "position" | "botCapitalEvent" | "fill" | "operatingCostAllocation" | "botRiskAdjustment" | "botPerformanceSnapshot" | "botLearnedInstruction" | "botLearningProposal" | "resourceSource" | "dailyMarketBrief" | "macroCalendarEvent" | "auditLog"
 >;
 
 /**
