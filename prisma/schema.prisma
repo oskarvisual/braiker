@@ -569,6 +569,7 @@ model MarketBar {
   createdAt DateTime @default(now()) @db.DateTime(3)
   @@unique([symbol, timeframe, timestamp, feed])
   @@index([symbol, timeframe, timestamp])
+  @@index([timestamp])
 }
 
 model MarketEvaluation {
@@ -582,6 +583,7 @@ model MarketEvaluation {
   createdAt       DateTime @default(now()) @db.DateTime(3)
   completedAt     DateTime? @db.DateTime(3)
   @@index([botId, symbol, candleTimestamp])
+  @@index([createdAt])
 }
 
 model BotScanRun {
@@ -615,6 +617,8 @@ model MarketStreamEvent {
   payload   Json
   createdAt DateTime @default(now()) @db.DateTime(3)
   @@index([symbol, createdAt])
+  @@index([provider, eventType, createdAt])
+  @@index([createdAt])
 }
 
 model StrategySignal {

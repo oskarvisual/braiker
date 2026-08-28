@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AlpacaMarketStreamManager, parseAlpacaMarketMessages, streamReconnectDelay } from "@/modules/market/alpaca-market-stream";
+import { AlpacaMarketStreamManager, parseAlpacaMarketMessages, persistAlpacaMarketStreamMessages, streamReconnectDelay } from "@/modules/market/alpaca-market-stream";
 
 class FakeSocket {
   sent: string[] = [];
@@ -28,6 +28,27 @@ describe("Alpaca market stream protocol", () => {
     expect(streamReconnectDelay(0, () => 0)).toBe(1_000);
     expect(streamReconnectDelay(2, () => 0)).toBe(4_000);
     expect(streamReconnectDelay(20, () => 0)).toBe(30_000);
+  });
+
+  it("persists only stream lifecycle telemetry while keeping completed bars for strategy recovery", async () => {
+    const db = {
+      marketStreamEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      marketBar: { createMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    };
+
+    await persistAlpacaMarketStreamMessages([
+      { type: "success", message: "heartbeat" },
+      { type: "quote", symbol: "SPY", timestamp: new Date("2026-08-21T14:30:04.000Z"), bid: "600", ask: "600.1" },
+      { type: "bar", symbol: "SPY", timestamp: new Date("2026-08-21T14:30:00.000Z"), open: "600", high: "601", low: "599", close: "600.5", volume: "10" }
+    ], "iex", db as never);
+
+    expect(db.marketStreamEvent.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ eventType: "STREAM_SUCCESS", symbol: null })]
+    });
+    expect(db.marketBar.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ symbol: "SPY" })],
+      skipDuplicates: true
+    }));
   });
 
   it("authenticates once, subscribes after authentication, persists events, and reconnects after a close", async () => {

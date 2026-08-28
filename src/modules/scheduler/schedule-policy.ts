@@ -1,5 +1,8 @@
 const supportedIntervals = [1, 5, 15, 30, 60] as const;
 
+/** node-cron uses six fields here; wake only once for each durable minute run. */
+export const marketCycleWakeupCron = "0 * * * * *";
+
 export type SynchronizationInterval = (typeof supportedIntervals)[number];
 
 export function reconciliationCron(intervalMinutes: number): string {

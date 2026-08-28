@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isIntervalCronDue, isTaskRunDue, marketCycleResumeAt, reconciliationCron } from "./schedule-policy";
+import { isIntervalCronDue, isTaskRunDue, marketCycleResumeAt, marketCycleWakeupCron, reconciliationCron } from "./schedule-policy";
 import { retryLeaseRecoveryWrite } from "./lease-scheduler";
 
 describe("reconciliation schedule policy", () => {
@@ -19,6 +19,10 @@ describe("reconciliation schedule policy", () => {
     expect(isTaskRunDue(nextOpen, new Date("2026-08-22T19:00:00.000Z"))).toBe(false);
     expect(isTaskRunDue(nextOpen, new Date("2026-08-24T13:30:00.000Z"))).toBe(true);
     expect(marketCycleResumeAt({ isOpen: true, nextOpen })).toBeNull();
+  });
+
+  it("wakes the leased market cycle once per minute rather than repeatedly claiming the same run", () => {
+    expect(marketCycleWakeupCron).toBe("0 * * * * *");
   });
 
   it("retries a transient MySQL write conflict without re-running a successful recovery", async () => {

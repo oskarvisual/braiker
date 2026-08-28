@@ -9,7 +9,7 @@ import { workerHeartbeat } from "@/modules/monitoring/metrics";
 import { processOneExecutionJob } from "@/modules/execution/execution-worker";
 import { ensureGlobalPaperWallet, syncGlobalPaperAccount } from "@/modules/broker/paper-sync";
 import { processMarketCycle } from "@/modules/market/market-runner";
-import { isIntervalCronDue } from "@/modules/scheduler/schedule-policy";
+import { isIntervalCronDue, marketCycleWakeupCron } from "@/modules/scheduler/schedule-policy";
 import { globalPaperBroker, globalPaperCredentials } from "@/modules/broker/global-paper";
 import { AlpacaMarketStreamManager } from "@/modules/market/alpaca-market-stream";
 import { botScanRetentionCutoff } from "@/modules/market/bot-scan-activity";
@@ -23,6 +23,7 @@ import { refreshDueResourceSources } from "@/modules/resources/resource-refresh"
 import { isSameNewYorkCalendarDay, newYorkMarketDate, publishDailyMarketBrief } from "@/modules/resources/daily-market-brief";
 import { publishDailyBotInputs } from "@/modules/resources/daily-bot-inputs";
 import { allocateMonthlyOperatingCosts } from "@/modules/capital/operating-cost-service";
+import { retainMarketTelemetry } from "@/modules/market/market-telemetry-retention";
 
 async function reconcilePortfolio() {
   await syncGlobalPaperAccount();
@@ -38,6 +39,11 @@ async function runReconciliationIfDue() {
 async function retainBotScanActivity() {
   const result = await prisma.botScanRun.deleteMany({ where: { startedAt: { lt: botScanRetentionCutoff() } } });
   logger.info({ deleted: result.count }, "Expired retained bot analysis activity");
+}
+
+async function retainMarketTelemetryActivity() {
+  const result = await retainMarketTelemetry(prisma);
+  logger.info(result, "Expired retained market telemetry");
 }
 
 async function activeStreamSymbols() {
@@ -91,6 +97,7 @@ async function main() {
     ensureTask("portfolio-reconciliation", "*/5 * * * *"),
     ensureTask("market-cycle", "*/1 * * * *"),
     ensureTask("bot-scan-retention", "15 0 * * *"),
+    ensureTask("market-telemetry-retention", "25 0 * * *"),
     ensureTask("resource-refresh", "*/15 * * * *"),
     ensureTask("daily-market-brief", "30 8 * * 1-5", "America/New_York"),
     ensureTask("monthly-operating-cost-allocation", "5 0 1 * *", "America/New_York"),
@@ -118,10 +125,11 @@ async function main() {
   }), { timezone: "UTC" });
   cron.schedule("*/1 * * * *", () => void runReconciliationIfDue(), { timezone: "UTC" });
   cron.schedule("15 0 * * *", () => void runTask("bot-scan-retention", retainBotScanActivity), { timezone: "UTC" });
+  cron.schedule("25 0 * * *", () => void runTask("market-telemetry-retention", retainMarketTelemetryActivity), { timezone: "UTC" });
   cron.schedule("*/15 * * * *", () => void runTask("resource-refresh", async () => { await refreshDueResourceSources(); }), { timezone: "UTC" });
   cron.schedule("30 8 * * 1-5", () => void runTask("daily-market-brief", publishBriefIfMarketDay), { timezone: "America/New_York" });
   cron.schedule("5 0 1 * *", () => void runTask("monthly-operating-cost-allocation", async () => { await allocateMonthlyOperatingCosts(); }), { timezone: "America/New_York" });
-  cron.schedule("5 * * * * *", () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
+  cron.schedule(marketCycleWakeupCron, () => void runTask("market-cycle", async () => { await processMarketCycle(); }), { timezone: "UTC" });
   cron.schedule("*/30 * * * * *", () => void processOneExecutionJob(), { timezone: "UTC" });
   cron.schedule("*/10 * * * * *", () => void pollTelegramBotManager().catch((error) => logger.warn({ err: sanitizeTelegramError(error) }, "Telegram Bot Manager polling failed")), { timezone: "UTC" });
   for (const schedule of managerReportSchedules) {

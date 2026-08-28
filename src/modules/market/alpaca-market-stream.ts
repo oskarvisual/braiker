@@ -86,9 +86,15 @@ export function alpacaMarketStreamUrl(feed: StreamFeed) {
 
 export async function persistAlpacaMarketStreamMessages(messages: ParsedMarketMessage[], feed: StreamFeed, db: PrismaClient = prisma) {
   if (!messages.length) return;
-  await db.marketStreamEvent.createMany({
-    data: messages.map((message) => ({ symbol: messageSymbol(message), eventType: eventType(message), provider: "alpaca-market-data", payload: JSON.parse(JSON.stringify(message)) })),
-  });
+  // Quotes are high-volume and only the REST cycle consumes the latest quote.
+  // Keep low-volume lifecycle diagnostics for health, but do not turn ticks into
+  // an unbounded MySQL event log.
+  const lifecycleEvents = messages.filter((message) => message.type === "success" || message.type === "error" || message.type === "subscription");
+  if (lifecycleEvents.length) {
+    await db.marketStreamEvent.createMany({
+      data: lifecycleEvents.map((message) => ({ symbol: messageSymbol(message), eventType: eventType(message), provider: "alpaca-market-data", payload: JSON.parse(JSON.stringify(message)) })),
+    });
+  }
   const bars = messages.filter((message): message is Extract<ParsedMarketMessage, { type: "bar" }> => message.type === "bar" && shouldAcceptBar(message.timestamp));
   if (bars.length) {
     await db.marketBar.createMany({
