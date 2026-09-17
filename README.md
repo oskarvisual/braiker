@@ -1,5 +1,33 @@
 # BrAIker
 
+## A paper-trading control room for disciplined experimentation
+
+BrAIker gives teams a clear, auditable way to explore automated trading ideas without connecting strategy experiments to live money. Built around Alpaca Paper, it combines deterministic signals, isolated virtual portfolios, explicit risk gates, durable execution evidence, and an operations-focused interface that makes every decision explainable.
+
+The result is a calm control room for testing strategies: see the whole fleet at a glance, trace every order back to its bot, review market context and analysis activity, and keep operational decisions behind deliberate confirmation steps.
+
+### Product tour
+
+
+The dashboard brings broker equity, cash, portfolio allocation, positions, recent orders, and fleet health into one view.
+
+
+Each bot has isolated capital, visible survival state, bounded risk limits, its own watchlist, and a complete operational history.
+
+
+The reviewed resource library keeps market context cited, bounded, and auditable while preserving the paper-only safety boundary.
+
+
+Bot Manager turns operational questions into readable, confirmation-first conversations without granting chat the authority to trade or change controls.
+
+![BrAIker dashboard](docs/screenshots/dashboard.png)
+
+![BrAIker bots](docs/screenshots/bots.png)
+
+![BrAIker resources](docs/screenshots/resources.png)
+
+![BrAIker Bot Manager](docs/screenshots/manager.png)
+
 BrAIker is a **paper-only**, multi-user trading-control application for US stocks and ETFs through **Alpaca Paper**. It uses Next.js, TypeScript, Prisma, and a dedicated MySQL 8 database.
 
 This repository is under active construction. Read [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) before making product or implementation decisions, then [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching data, worker, broker, or API code. Those documents distinguish implemented behavior from planned work.
